@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "tables.h"
+#include "spe.h"
 
 #define ISQRT2 0.70710678118654f
 
@@ -161,6 +162,23 @@ void dequant_idct_block_8x8(int16_t *in_data, int16_t *out_data, uint8_t *quant_
         out_data[i] = mb[i];
 }
 
+void *run_sad_spe(void *thread_arg)
+{
+    int ret;
+    thread_arg_t *arg = (thread_arg_t *) thread_arg;
+    unsigned int entry;
+    spe_stop_info_t stop_info;
+
+    entry = SPE_DEFAULT_ENTRY;
+    ret = spe_context_run(arg->spe, &entry, 0, arg->params, NULL, &stop_info);
+    if (ret < 0) {
+        perror("spe_context_run");
+        return NULL;
+    }
+
+    return NULL;
+}
+
 void sad_block_8x8(uint8_t *block1, uint8_t *block2, int stride, int *result)
 {
     *result = 0;
@@ -169,4 +187,27 @@ void sad_block_8x8(uint8_t *block1, uint8_t *block2, int stride, int *result)
     for (v=0; v<8; ++v)
         for (u=0; u<8; ++u)
             *result += abs(block2[v*stride+u] - block1[v*stride+u]);
+}
+
+void sad_8rows(uint8_t *orig, uint8_t *ref, int w, int *sad, int *best_x, int *best_row)
+{
+    int row, x;
+    int best_rows_sad = INT_MAX;
+    int rows_sad, best_rows_x = 0, best_rows_row = 0;
+    for (row = 0; row < 8; row++)
+    {
+        for (x = 0; x < w; x++)
+        {
+            sad_block_8x8(orig, ref + row*w+x, w, &rows_sad);
+            if (rows_sad < best_rows_sad)
+            {
+                best_rows_x = x;
+                best_rows_row = row;
+                best_rows_sad = rows_sad;
+            }
+        }
+    }
+    *sad = best_rows_sad;
+    *best_x = best_rows_x;
+    *best_row = best_rows_row;
 }

@@ -98,7 +98,6 @@ struct c63_common
     struct entropy_ctx e_ctx;
 };
 
-
 void put_bytes(FILE *fp, const void* data, unsigned int len);
 void put_byte(FILE *fp, int byte);
 void put_bits(struct entropy_ctx *c, uint16_t bits, uint8_t n);
@@ -124,5 +123,7 @@ void c63_motion_estimate(struct c63_common *cm);
 void c63_motion_compensate(struct c63_common *cm);
 
 void dump_image(yuv_t *image, int w, int h, FILE *fp);
+
+void sad_8rows(uint8_t *orig, uint8_t *ref, int w, int *sad, int *best_x, int *best_row);
 
 #endif /* mjpeg_encoder.h */

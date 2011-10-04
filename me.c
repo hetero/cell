@@ -10,7 +10,6 @@
 
 #include "c63.h"
 
-
 /* Motion estimation for 8x8 block */
 static void me_block_8x8(struct c63_common *cm, int mb_x, int mb_y, uint8_t *orig, uint8_t *ref, int cc)
 {
@@ -70,19 +69,14 @@ static void me_block_8x8(struct c63_common *cm, int mb_x, int mb_y, uint8_t *ori
         // main case
         for (y=top; y<bottom; y += 8)
         {
-            for (x=left; x<right; ++x)
+            int sad, best_row, best_x;
+            sad_8rows(orig + my*w+mx, ref + y*w, w, &sad, &best_x, &best_row);
+
+            if (sad < best_sad)
             {
-                int sad;
-                sad_block_8x8(orig + my*w+mx, ref + y*w+x, w, &sad);
-
-    //            printf("(%4d,%4d) - %d\n", x, y, sad);
-
-                if (sad < best_sad)
-                {
-                    mb->mv_x = x - mx;
-                    mb->mv_y = y - my;
-                    best_sad = sad;
-                }
+                mb->mv_x = best_x - mx;
+                mb->mv_y = y + best_row - my;
+                best_sad = sad;
             }
         }
     }

@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -O3 -Wall -g -D_XOPEN_SOURCE=600
-LDFLAGS = -lm 
+LDFLAGS = -lm -lspe2 
 
 all: c63enc c63dec
 
