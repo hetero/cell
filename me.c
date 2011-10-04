@@ -43,20 +43,46 @@ static void me_block_8x8(struct c63_common *cm, int mb_x, int mb_y, uint8_t *ori
     int my = mb_y * 8;
 
     int best_sad = INT_MAX;
-    for (y=top; y<bottom; ++y)
+
+    if ((bottom - top) % 8 != 0)
     {
-        for (x=left; x<right; ++x)
+        // border-case (can be done better)
+        for (y=top; y<bottom; ++y)
         {
-            int sad;
-            sad_block_8x8(orig + my*w+mx, ref + y*w+x, w, &sad);
-
-//            printf("(%4d,%4d) - %d\n", x, y, sad);
-
-            if (sad < best_sad)
+            for (x=left; x<right; ++x)
             {
-                mb->mv_x = x - mx;
-                mb->mv_y = y - my;
-                best_sad = sad;
+                int sad;
+                sad_block_8x8(orig + my*w+mx, ref + y*w+x, w, &sad);
+
+    //            printf("(%4d,%4d) - %d\n", x, y, sad);
+
+                if (sad < best_sad)
+                {
+                    mb->mv_x = x - mx;
+                    mb->mv_y = y - my;
+                    best_sad = sad;
+                }
+            }
+        }
+    }
+    else
+    {
+        // main case
+        for (y=top; y<bottom; y += 8)
+        {
+            for (x=left; x<right; ++x)
+            {
+                int sad;
+                sad_block_8x8(orig + my*w+mx, ref + y*w+x, w, &sad);
+
+    //            printf("(%4d,%4d) - %d\n", x, y, sad);
+
+                if (sad < best_sad)
+                {
+                    mb->mv_x = x - mx;
+                    mb->mv_y = y - my;
+                    best_sad = sad;
+                }
             }
         }
     }

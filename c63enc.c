@@ -34,13 +34,15 @@ extern char *optarg;
 /* Read YUV frames */
 static yuv_t* read_yuv(FILE *file)
 {
+    int nothing;
     size_t len = 0;
-    yuv_t *image = malloc(sizeof(yuv_t));
+    yuv_t *image = NULL;
+    nothing = posix_memalign((void **) &image, 16, sizeof(yuv_t));
 
     printf("Reading...\n");
 
     /* Read Y' */
-    image->Y = malloc(width*height);
+    nothing = posix_memalign((void **) &(image->Y), 16, width*height);
     len += fread(image->Y, 1, width*height, file);
     if(ferror(file))
     {
@@ -49,7 +51,7 @@ static yuv_t* read_yuv(FILE *file)
     }
 
     /* Read U */
-    image->U = malloc(width*height);
+    nothing = posix_memalign((void **) &(image->U), 16, width*height);
     len += fread(image->U, 1, (width*height)/4, file);
     if(ferror(file))
     {
@@ -58,7 +60,7 @@ static yuv_t* read_yuv(FILE *file)
     }
 
     /* Read V */
-    image->V = malloc(width*height);
+    nothing = posix_memalign((void **) &(image->V), 16, width*height);
     len += fread(image->V, 1, (width*height)/4, file);
     if(ferror(file))
     {
