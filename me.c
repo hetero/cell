@@ -69,19 +69,6 @@ static void me_block_8x8(struct c63_common *cm, int mb_x, int mb_y, uint8_t *ori
         // main case
         for (y=top; y<bottom; y += 8)
         {
-            ////
-            for (x=left; x<right; x++) {
-                int sad;
-                sad_block_8x8(orig + my*w+mx, ref+y*w+x, w, &sad);
-                if (sad < best_sad)
-                {
-                    mb->mv_x = x - mx;
-                    mb->mv_y = y - my;
-                    best_sad = sad;
-                }
-            }
-            ///
-
             int sad, best_row, best_x;
             sad_8rows(orig + my*w+mx, ref + y*w, w, &sad, &best_x, &best_row,
                     left, right);
