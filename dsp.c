@@ -189,14 +189,15 @@ void sad_block_8x8(uint8_t *block1, uint8_t *block2, int stride, int *result)
             *result += abs(block2[v*stride+u] - block1[v*stride+u]);
 }
 
-void sad_8rows(uint8_t *orig, uint8_t *ref, int w, int *sad, int *best_x, int *best_row)
+void sad_8rows(uint8_t *orig, uint8_t *ref, int w, int *sad, int *best_x, 
+                int *best_row, int left, int right)
 {
     int row, x;
     int best_rows_sad = INT_MAX;
     int rows_sad, best_rows_x = 0, best_rows_row = 0;
     for (row = 0; row < 8; row++)
     {
-        for (x = 0; x < w; x++)
+        for (x = left; x < right; x++)
         {
             sad_block_8x8(orig, ref + row*w+x, w, &rows_sad);
             if (rows_sad < best_rows_sad)

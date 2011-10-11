@@ -124,6 +124,6 @@ void c63_motion_compensate(struct c63_common *cm);
 
 void dump_image(yuv_t *image, int w, int h, FILE *fp);
 
-void sad_8rows(uint8_t *orig, uint8_t *ref, int w, int *sad, int *best_x, int *best_row);
+void sad_8rows(uint8_t *orig, uint8_t *ref, int w, int *sad, int *best_x, int *best_row, int left, int right);
 
 #endif /* mjpeg_encoder.h */
