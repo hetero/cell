@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include "spe.h"
 
 #define MAX_FILELENGTH 200
 #define DEFAULT_OUTPUT_FILE "a.mjpg"
@@ -124,6 +125,6 @@ void c63_motion_compensate(struct c63_common *cm);
 
 void dump_image(yuv_t *image, int w, int h, FILE *fp);
 
-void sad_8rows(uint8_t *orig, uint8_t *ref, int w, int *sad, int *best_x, int *best_row, int left, int right);
+void sad_4rows(uint8_t *orig, uint8_t *ref, sad_out_t *sad_out, int w);
 
 #endif /* mjpeg_encoder.h */

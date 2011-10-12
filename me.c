@@ -7,8 +7,52 @@
 #include <math.h>
 #include <assert.h>
 #include <limits.h>
+#include <libspe2.h>
 
 #include "c63.h"
+
+void *run_sad_spe(void *thread_arg) {
+    int ret;
+    thread_arg_t *arg = (thread_arg_t *) thread_arg;
+    unsigned int entry;
+    spe_stop_info_t stop_info;
+
+    entry = SPE_DEFAULT_ENTRY;
+    ret = spe_context_run(arg->spe, &entry, 0, arg->params, NULL, &stop_info);
+    if (ret < 0) {
+        perror("spe_context_run");
+        return NULL;
+    }
+
+    return NULL;
+}
+
+void me_cell(uint8_t *orig, uint8_t *ref, sad_out_t *sad_out, int w) {
+    const int NUM_SPE = 8;
+    int spe, y, ret;
+    sad_out_t spe_out[8];
+/*    sad_params_t sad_params[NUM_SPE] __attribute__((aligned(16)));;
+
+    spe_program_handle_t *prog;
+    spe_context_ptr_t spe[NUM_SPE];
+    pthread_t thread[NUM_SPE];
+    thread_arg_t arg[NUM_SPE];
+
+    prog = spe_image_open("sad_spe.elf");
+*/
+    for (y = 0, spe = 0; spe < 8; y += 4, spe++) {
+        sad_4rows(orig, ref + y*w, &spe_out[spe], w);
+    }
+    
+    for (y = 0, spe = 0; spe < 8; y += 4, spe++) {
+        if (spe_out[spe].sad < sad_out->sad)
+        {
+            sad_out->x = spe_out[spe].x;
+            sad_out->y = y + spe_out[spe].y;
+            sad_out->sad = spe_out[spe].sad;
+        }
+    }
+}
 
 /* Motion estimation for 8x8 block */
 static void me_block_8x8(struct c63_common *cm, int mb_x, int mb_y, uint8_t *orig, uint8_t *ref, int cc)
@@ -43,7 +87,7 @@ static void me_block_8x8(struct c63_common *cm, int mb_x, int mb_y, uint8_t *ori
 
     int best_sad = INT_MAX;
 
-    if ((bottom - top) % 8 != 0)
+    if (bottom - top != 32) // TODO 32 constant
     {
         // border-case (can be done better)
         for (y=top; y<bottom; ++y)
@@ -66,19 +110,18 @@ static void me_block_8x8(struct c63_common *cm, int mb_x, int mb_y, uint8_t *ori
     }
     else
     {
-        // main case
-        for (y=top; y<bottom; y += 8)
+        // main case (bottom-top == 32)
+        sad_out_t sad_out;
+        sad_out.sad = INT_MAX;
+        sad_out.x = 0;
+        sad_out.y = 0;
+        me_cell(orig + my*w + mx, ref + top*w + left, &sad_out, w); 
+        
+        if (sad_out.sad < best_sad)
         {
-            int sad, best_row, best_x;
-            sad_8rows(orig + my*w+mx, ref + y*w, w, &sad, &best_x, &best_row,
-                    left, right);
-
-            if (sad < best_sad)
-            {
-                mb->mv_x = best_x - mx;
-                mb->mv_y = y + best_row - my;
-                best_sad = sad;
-            }              
+            mb->mv_x = left + sad_out.x - mx;
+            mb->mv_y = top + sad_out.y - my;
+            best_sad = sad_out.sad;
         }
     }
 
