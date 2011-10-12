@@ -1,9 +1,10 @@
 #include <inttypes.h>
 #include <math.h>
 #include <stdlib.h>
+#include <limits.h>
+#include "spe.h"
 
 #include "tables.h"
-#include "spe.h"
 
 #define ISQRT2 0.70710678118654f
 

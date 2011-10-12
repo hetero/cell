@@ -8,8 +8,10 @@
 #include <assert.h>
 #include <limits.h>
 #include <libspe2.h>
+#include <pthread.h>
 
 #include "c63.h"
+#include "ppe.h"
 
 void *run_sad_spe(void *thread_arg) {
     int ret;
@@ -29,9 +31,9 @@ void *run_sad_spe(void *thread_arg) {
 
 void me_cell(uint8_t *orig, uint8_t *ref, sad_out_t *sad_out, int w) {
     const int NUM_SPE = 8;
-    int spe, y, ret;
-    sad_out_t spe_out[8];
-/*    sad_params_t sad_params[NUM_SPE] __attribute__((aligned(16)));;
+    int i, y, ret;
+    sad_out_t spe_out[NUM_SPE] __attribute__((aligned(16)));
+    sad_params_t sad_params[NUM_SPE] __attribute__((aligned(16)));;
 
     spe_program_handle_t *prog;
     spe_context_ptr_t spe[NUM_SPE];
@@ -39,17 +41,63 @@ void me_cell(uint8_t *orig, uint8_t *ref, sad_out_t *sad_out, int w) {
     thread_arg_t arg[NUM_SPE];
 
     prog = spe_image_open("sad_spe.elf");
-*/
-    for (y = 0, spe = 0; spe < 8; y += 4, spe++) {
-        sad_4rows(orig, ref + y*w, &spe_out[spe], w);
+    if (!prog) {
+        perror("spe_image_open");
+        exit(1);
+    }
+
+    for (i = 0; i < NUM_SPE; i++) {
+        spe[i] = spe_context_create(0, NULL);
+        if (!spe[i]) {
+            perror("spe_context_create");
+            exit(1);
+        }
+
+        ret = spe_program_load(spe[i], prog);
+        if (ret) {
+            perror("spe_program_load");
+            exit(1);
+        }
+    }
+
+    for (i = 0, y = 0; i < NUM_SPE; i++, y += 4) {
+        sad_params[i].orig = (unsigned long) &orig[0];
+        sad_params[i].ref = (unsigned long) &ref[y*w];
+        sad_params[i].out = (unsigned long) &spe_out[i];
+        sad_params[i].w = w;
+
+        arg[i].spe = spe[i];
+        arg[i].params = &sad_params[i];
+
+        ret = pthread_create(&thread[i], NULL, run_sad_spe, &arg[i]);
+        if (ret) {
+            perror("pthread_create");
+            exit(1);
+        }
+    }
+//sad_4rows(orig, ref + y*w, &spe_out[i], w);
+    
+    for (i = 0; i < NUM_SPE; i++) {
+        pthread_join(thread[i], NULL);
+        ret = spe_context_destroy(spe[i]);
+        if (ret) {
+            perror("spe_context_destroy");
+            exit(1);
+        }
+    }
+
+    ret = spe_image_close(prog);
+    if (ret) {
+        perror("spe_image_close");
+        exit(1);
     }
     
-    for (y = 0, spe = 0; spe < 8; y += 4, spe++) {
-        if (spe_out[spe].sad < sad_out->sad)
+    for (i = 0, y = 0; i < NUM_SPE; i++, y += 4) {
+        if (spe_out[i].sad < sad_out->sad)
         {
-            sad_out->x = spe_out[spe].x;
-            sad_out->y = y + spe_out[spe].y;
-            sad_out->sad = spe_out[spe].sad;
+            sad_out->x = spe_out[i].x;
+            sad_out->y = y + spe_out[i].y;
+            sad_out->sad = spe_out[i].sad;
         }
     }
 }
