@@ -2,7 +2,7 @@
 #define SPE_H
 
 typedef struct {
-            int sad, x, y;
+            int sad, x, y, pad;
 } sad_out_t;
 
 typedef struct {
@@ -10,7 +10,7 @@ typedef struct {
     unsigned long long ref;
     unsigned long long out;
     int w;
-    int pad;
+    int shift;
 } sad_params_t;
 
 #endif

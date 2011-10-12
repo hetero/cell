@@ -29,7 +29,7 @@ void *run_sad_spe(void *thread_arg) {
     return NULL;
 }
 
-void me_cell(uint8_t *orig, uint8_t *ref, sad_out_t *sad_out, int w) {
+void me_cell(uint8_t *orig, uint8_t *ref, sad_out_t *sad_out, int w, int shift) {
     const int NUM_SPE = 8;
     int i, y, ret;
     sad_out_t spe_out[NUM_SPE] __attribute__((aligned(16)));
@@ -65,6 +65,7 @@ void me_cell(uint8_t *orig, uint8_t *ref, sad_out_t *sad_out, int w) {
         sad_params[i].ref = (unsigned long) &ref[y*w];
         sad_params[i].out = (unsigned long) &spe_out[i];
         sad_params[i].w = w;
+        sad_params[i].shift = shift;
 
         arg[i].spe = spe[i];
         arg[i].params = &sad_params[i];
@@ -75,7 +76,6 @@ void me_cell(uint8_t *orig, uint8_t *ref, sad_out_t *sad_out, int w) {
             exit(1);
         }
     }
-//sad_4rows(orig, ref + y*w, &spe_out[i], w);
     
     for (i = 0; i < NUM_SPE; i++) {
         pthread_join(thread[i], NULL);
@@ -159,11 +159,17 @@ static void me_block_8x8(struct c63_common *cm, int mb_x, int mb_y, uint8_t *ori
     else
     {
         // main case (bottom-top == 32)
+        int orig_offset = 0, ref_offset = 0;
         sad_out_t sad_out;
         sad_out.sad = INT_MAX;
         sad_out.x = 0;
         sad_out.y = 0;
-        me_cell(orig + my*w + mx, ref + top*w + left, &sad_out, w); 
+        if (mb_x % 2 == 1)
+            orig_offset = -8;
+        if (left % 16 == 8)
+            ref_offset = -8;
+            me_cell(orig + my*w + mx + orig_offset, 
+                    ref + top*w + left + ref_offset, &sad_out, w, 0); 
         
         if (sad_out.sad < best_sad)
         {

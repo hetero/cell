@@ -8,7 +8,7 @@ SPU_LDFLAGS =
 
 all: c63enc c63dec
 
-c63enc: c63enc.o dsp.o tables.o io.o c63_write.o c63.h common.o me.o sad_spe.elf
+c63enc: c63enc.o dsp.o tables.o io.o c63_write.o c63.h common.o me.o sad_spe.elf spe.h ppe.h
 
 c63dec: c63dec.o dsp.o tables.o io.o c63.h common.o me.o
 
