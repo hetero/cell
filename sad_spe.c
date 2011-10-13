@@ -15,11 +15,11 @@
 
 typedef unsigned long long ULL;
 
-uint8_t orig[4*MAX_WIDTH] __attribute__((aligned(16)));
-uint8_t ref[4*MAX_WIDTH] __attribute__((aligned(16)));
-sad_out_t sad_out __attribute__((aligned(16)));
-int w __attribute__((aligned(16)));
-int shift __attribute__((aligned(16)));
+uint8_t orig[4*MAX_WIDTH] __attribute__((aligned(128)));
+uint8_t ref[4*MAX_WIDTH] __attribute__((aligned(128)));
+sad_out_t sad_out __attribute__((aligned(128)));
+int w __attribute__((aligned(128)));
+int shift __attribute__((aligned(128)));
 
 void spe_sad_block_8x8(uint8_t *block1, uint8_t *block2, int stride, int *result)
 {   
@@ -60,7 +60,7 @@ void spe_sad_4rows()
 
 int main(ULL spe, ULL argp, ULL envp) {
     int tag = 1;
-    sad_params_t params __attribute__((aligned(16)));
+    sad_params_t params __attribute__((aligned(128)));
     
     // GET params
     spu_mfcdma64(&params, mfc_ea2h(argp), mfc_ea2l(argp), sizeof(sad_params_t),

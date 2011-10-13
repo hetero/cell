@@ -2,8 +2,8 @@
 
 #include <inttypes.h>
 
-extern uint8_t yquanttbl_def[64] __attribute__((aligned(16)));
-extern uint8_t uvquanttbl_def[64] __attribute__((aligned(16)));
+extern uint8_t yquanttbl_def[64] __attribute__((aligned(128)));
+extern uint8_t uvquanttbl_def[64] __attribute__((aligned(128)));
 extern uint16_t DCVLC[2][12];
 extern uint8_t DCVLC_Size[2][12];
 extern uint8_t DCVLC_num_by_length[2][16];

@@ -8,7 +8,7 @@
 */
 
 
-uint8_t yquanttbl_def[64] __attribute__((aligned(16))) =
+uint8_t yquanttbl_def[64] __attribute__((aligned(128))) =
 {
     16, 11, 12, 14, 12, 10, 16, 14,
     13, 14, 18, 17, 16, 19, 24, 40,
@@ -21,7 +21,7 @@ uint8_t yquanttbl_def[64] __attribute__((aligned(16))) =
 };
 
 
-uint8_t uvquanttbl_def[64] __attribute__((aligned(16))) =
+uint8_t uvquanttbl_def[64] __attribute__((aligned(128))) =
 {
     17, 18, 18, 24, 21, 24, 47, 26,
     26, 47, 99, 66, 56, 66, 99, 99,

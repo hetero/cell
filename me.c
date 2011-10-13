@@ -32,8 +32,8 @@ void *run_sad_spe(void *thread_arg) {
 void me_cell(uint8_t *orig, uint8_t *ref, sad_out_t *sad_out, int w, int shift) {
     const int NUM_SPE = 8;
     int i, y, ret;
-    sad_out_t spe_out[NUM_SPE] __attribute__((aligned(16)));
-    sad_params_t sad_params[NUM_SPE] __attribute__((aligned(16)));;
+    sad_out_t spe_out[NUM_SPE] __attribute__((aligned(128)));
+    sad_params_t sad_params[NUM_SPE] __attribute__((aligned(128)));;
 
     spe_program_handle_t *prog;
     spe_context_ptr_t spe[NUM_SPE];

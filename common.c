@@ -113,41 +113,41 @@ struct frame* create_frame(struct c63_common *cm, yuv_t *image)
     int nothing;
 
     struct frame *f = NULL;
-    nothing = posix_memalign((void **) &f, 16, sizeof(struct frame));
+    nothing = posix_memalign((void **) &f, 128, sizeof(struct frame));
 
     f->orig = image;
 
-    nothing = posix_memalign((void **) &(f->recons), 16, sizeof(yuv_t));
-    nothing = posix_memalign((void **) &(f->recons->Y), 16, cm->ypw * cm->yph);
-    nothing = posix_memalign((void **) &(f->recons->U), 16, cm->upw * cm->uph);
-    nothing = posix_memalign((void **) &(f->recons->V), 16, cm->vpw * cm->vph);
+    nothing = posix_memalign((void **) &(f->recons), 128, sizeof(yuv_t));
+    nothing = posix_memalign((void **) &(f->recons->Y), 128, cm->ypw * cm->yph);
+    nothing = posix_memalign((void **) &(f->recons->U), 128, cm->upw * cm->uph);
+    nothing = posix_memalign((void **) &(f->recons->V), 128, cm->vpw * cm->vph);
 
-    nothing = posix_memalign((void **) &(f->predicted), 16, sizeof(yuv_t));
-    nothing = posix_memalign((void **) &(f->predicted->Y), 16, cm->ypw * cm->yph);
-    nothing = posix_memalign((void **) &(f->predicted->U), 16, cm->upw * cm->uph);
-    nothing = posix_memalign((void **) &(f->predicted->V), 16, cm->vpw * cm->vph);
+    nothing = posix_memalign((void **) &(f->predicted), 128, sizeof(yuv_t));
+    nothing = posix_memalign((void **) &(f->predicted->Y), 128, cm->ypw * cm->yph);
+    nothing = posix_memalign((void **) &(f->predicted->U), 128, cm->upw * cm->uph);
+    nothing = posix_memalign((void **) &(f->predicted->V), 128, cm->vpw * cm->vph);
 
     memset(f->predicted->Y, 0x80, cm->ypw * cm->yph);
     memset(f->predicted->U, 0x80, cm->upw * cm->uph);
     memset(f->predicted->V, 0x80, cm->vpw * cm->vph);
 
-    nothing = posix_memalign((void **) &(f->residuals), 16, sizeof(dct_t));
-    nothing = posix_memalign((void **) &(f->residuals->Ydct), 16, 
+    nothing = posix_memalign((void **) &(f->residuals), 128, sizeof(dct_t));
+    nothing = posix_memalign((void **) &(f->residuals->Ydct), 128, 
         cm->ypw * cm->yph * sizeof(int16_t));
-    nothing = posix_memalign((void **) &(f->residuals->Udct), 16, 
+    nothing = posix_memalign((void **) &(f->residuals->Udct), 128, 
         cm->upw * cm->uph * sizeof(int16_t));
-    nothing = posix_memalign((void **) &(f->residuals->Vdct), 16, 
+    nothing = posix_memalign((void **) &(f->residuals->Vdct), 128, 
         cm->vpw * cm->vph * sizeof(int16_t));
 
     memset(f->residuals->Ydct, 0x80, cm->ypw * cm->yph * sizeof(int16_t));
     memset(f->residuals->Udct, 0x80, cm->upw * cm->uph * sizeof(int16_t));
     memset(f->residuals->Vdct, 0x80, cm->vpw * cm->vph * sizeof(int16_t));
     
-    nothing = posix_memalign((void **) &(f->mbs[0]), 16,
+    nothing = posix_memalign((void **) &(f->mbs[0]), 128,
        cm->ypw * cm->yph * sizeof(struct macroblock));
-    nothing = posix_memalign((void **) &(f->mbs[1]), 16,
+    nothing = posix_memalign((void **) &(f->mbs[1]), 128,
        cm->upw * cm->uph * sizeof(struct macroblock));
-    nothing = posix_memalign((void **) &(f->mbs[2]), 16,
+    nothing = posix_memalign((void **) &(f->mbs[2]), 128,
        cm->vpw * cm->vph * sizeof(struct macroblock));
 
     memset(f->mbs[0], 0, cm->ypw * cm->yph * sizeof(struct macroblock));
