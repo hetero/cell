@@ -1,11 +1,11 @@
 #include <stdio.h>
 #include <spu_mfcio.h>
-//#include <spu_intrinsics.h>
+#include <spu_intrinsics.h>
 #include "spe.h"
 
 #define REF_WIDTH 128
 #define REF_HEIGHT 39
-#define ORIG_WIDTH 16
+#define ORIG_WIDTH 8
 #define ORIG_HEIGHT 8
 #define SAD_WIDTH 32
 #define SAD_HEIGHT 32
@@ -19,9 +19,11 @@
 
 typedef unsigned long long ULL;
 
-uint8_t orig[ORIG_WIDTH * ORIG_HEIGHT] __attribute__((aligned(128)));
-uint8_t ref[REF_WIDTH * REF_HEIGHT] __attribute__((aligned(128)));
+uint8_t orig_array[ORIG_WIDTH * ORIG_HEIGHT] __attribute__((aligned(128)));
+uint8_t ref_array[REF_WIDTH * REF_HEIGHT] __attribute__((aligned(128)));
 int sad[ORIG_WIDTH * ORIG_HEIGHT] __attribute__((aligned(128)));
+uint8_t *orig = orig_array;
+uint8_t *ref = ref_array;
 
 sad_out_t sad_out __attribute__((aligned(128)));
 
@@ -36,28 +38,34 @@ int ref_h __attribute__((aligned(128)));
 int sad_w __attribute__((aligned(128)));
 int sad_h __attribute__((aligned(128)));
 
-const int big_diamond[9][2] = {
-    {0, 0},
-    {2, 0},
-    {1, 1},
-    {0, 2},
-    {-1, 1},
-    {-2, 0},
-    {-1, -1},
-    {0, -2},
-    {1, -1}
+const int big_diamond_array[9 * 2] = {
+    0, 0,
+    2, 0,
+    1, 1,
+    0, 2,
+    -1, 1,
+    -2, 0,
+    -1, -1,
+    0, -2,
+    1, -1
 };
 
-const int small_diamond[5][2] = {
-    {0, 0},
-    {1, 0},
-    {0, 1},
-    {-1, 0},
-    {0, -1}
+const int small_diamond_array[5 * 2] = {
+    0, 0,
+    1, 0,
+    0, 1,
+    -1, 0,
+    0, -1
 };
+
+const int *big_diamond = big_diamond_array;
+const int *small_diamond = small_diamond_array;
+
+__vector unsigned char reg __((aligned(16)));
+__vector unsigned char tmp __((aligned(16)));
 
 void read_row(uint8_t *dst, ULL src, int size, int offset) {
-    int tag;
+    int tag = 1;
     int read_size = size + offset;
     read_size += (16 - (read_size%16)) % 16;
     spu_mfcdma64(dst, mfc_ea2h(src), mfc_ea2l(src), 
@@ -80,12 +88,26 @@ void spe_sad_block_8x8(uint8_t *block1, uint8_t *block2, int stride, int *result
         }
 }
 
+void get_ref(int x, int y) {
+    int offset1 = (y*wm128 + x) % 16;
+    int offset2 = (offset1 + wm128) % 16;
+
+    uint8_t *ref_ptr = &ref[
+
+    if (offset1 <= 8) {
+        tmp = spu_slqwbyte(
+
+
 int calc_sad(int x, int y) {
-    //TODO
-    return 0; 
+    int i, sum = 0;
+    for (i = 0; i < 4; i++) {
+        get_ref(x, y);
+        sum += sad16((__vector unsigned char) (orig + 16*i));
+    }
+    return sum; 
 }
 
-int get_sad(int x, int y, int *vec) {
+int get_sad(int x, int y, const int *vec) {
     x += vec[0];
     y += vec[1];
     if (x < 0 || x >= sad_w || y < 0 || y >= sad_h)
@@ -104,27 +126,27 @@ void ds_init() {
 void small_ds(int x, int y) {
     int i;
     int best_sad = INT_MAX;
-    int best_dir;
+    int best_dir = 0;
     int sad;
     for (i = 0; i < 5; i++) {
-        sad = get_sad(x, y, small_diamond[i]);
+        sad = get_sad(x, y, &small_diamond[2 * i]);
         if (sad < best_sad) {
             best_dir = i;
             best_sad = sad;
         }
     }
-    sad_out.x = x + small_diamond[best_dir][0];
-    sad_out.y = y + small_diamond[best_dir][1];
+    sad_out.x = x + small_diamond[2 * best_dir];
+    sad_out.y = y + small_diamond[2 * best_dir + 1];
     sad_out.sad = best_sad;
 }
 
 void ds(int x, int y) {
     int i;
     int best_sad = INT_MAX;
-    int best_dir;
+    int best_dir = 0;
     int sad;
     for (i = 0; i < 9; i++) {
-        sad = get_sad(x, y, big_diamond[i]);
+        sad = get_sad(x, y, &big_diamond[2 * i]);
         if (sad < best_sad) {
             best_dir = i;
             best_sad = sad;
@@ -134,7 +156,7 @@ void ds(int x, int y) {
         small_ds(x, y);
     }
     else {
-        ds(x + big_diamond[best_dir][0], y + big_diamond[best_dir][1]);
+        ds(x + big_diamond[2 * best_dir], y + big_diamond[2 * best_dir]);
     }
 }
 
@@ -163,7 +185,7 @@ int main(ULL spe, ULL argp, ULL envp) {
     // GET orig
     for (i = 0; i < ORIG_HEIGHT; ++i) {
         read_row(orig, params.orig, 8, orig_offset);
-        orig += ORIG_WIDTH;
+        orig = (uint8_t *)orig + ORIG_WIDTH;
         params.orig += w + orig_offset;
         orig_offset = params.orig % 128;
         params.orig -= orig_offset;
@@ -175,11 +197,11 @@ int main(ULL spe, ULL argp, ULL envp) {
         ref += REF_WIDTH;
         params.ref += w + ref_offset;
         ref_offset = params.ref % 128;
-        params.ref -= params_offset;
+        params.ref -= ref_offset;
     }
 
     // calc
-    ds();
+    ds(orig_x, orig_y);
 
     // PUT sad_out
     spu_mfcdma64(&sad_out, mfc_ea2h(params.sad_out), mfc_ea2l(params.sad_out),
