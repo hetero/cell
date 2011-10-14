@@ -58,11 +58,37 @@ const int small_diamond_array[5 * 2] = {
     0, -1
 };
 
+__vector unsigned char mask[16] __attribute((aligned(16)));
+mask[0] = (__vector unsigned char) {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+mask[1] = (__vector unsigned char) {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+mask[2] = (__vector unsigned char) {2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17};
+mask[3] = (__vector unsigned char) {3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18};
+mask[4] = (__vector unsigned char) {4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
+mask[5] = (__vector unsigned char) {5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20};
+mask[6] = (__vector unsigned char) {6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21};
+mask[7] = (__vector unsigned char) {7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22};
+mask[8] = (__vector unsigned char) {8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23};
+mask[9] = (__vector unsigned char) {9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24};
+mask[10] = (__vector unsigned char) {10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25};
+mask[11] = (__vector unsigned char) {11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26};
+mask[12] = (__vector unsigned char) {12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27};
+mask[13] = (__vector unsigned char) {13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28};
+mask[14] = (__vector unsigned char) {14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29};
+mask[15] = (__vector unsigned char) {15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30};
+
+__vector unsigned char merge_mask __attribute((aligned(16)));
+merge_mask = {0,1,2,3,4,5,6,7,16,17,18,19,20,21,22,23};
+
 const int *big_diamond = big_diamond_array;
 const int *small_diamond = small_diamond_array;
 
 __vector unsigned char reg __((aligned(16)));
 __vector unsigned char tmp __((aligned(16)));
+__vector unsigned char diff1 __((aligned(16)));
+__vector unsigned char diff2 __((aligned(16)));
+__vector unsigned char ineq __((aligned(16)));
+__vector unsigned char sd __((aligned(16)));
+
 
 void read_row(uint8_t *dst, ULL src, int size, int offset) {
     int tag = 1;
@@ -89,20 +115,38 @@ void spe_sad_block_8x8(uint8_t *block1, uint8_t *block2, int stride, int *result
 }
 
 void get_ref(int x, int y) {
-    int offset1 = (y*wm128 + x) % 16;
-    int offset2 = (offset1 + wm128) % 16;
+    int offset1 = (y*ref_w + x) % 16;
+    int offset2 = (offset1 + ref_w) % 16;
 
-    uint8_t *ref_ptr = &ref[
+    uint8_t *ref_ptr = &ref[y*ref_w + x - offset1];
 
-    if (offset1 <= 8) {
-        tmp = spu_slqwbyte(
+    reg = spu_shuffle((__vector unsigned char) ref_ptr,
+            (__vector unsigned char) (ref_ptr + 16), mask[offset1]);
 
+    ref_ptr = &ref[(y+1)*ref_w + x - offset2];
+    tmp = spu_shuffle((__vector unsigned char) ref_ptr,
+            (__vector unsigned char) (ref_ptr + 16), mask[offset2]);
+
+    reg = spu_shuffle(reg, tmp, merge_mask);
+}
+
+int sad16(__vector unsigned char orig_reg) {
+    ineq = spu_cmpgt(orig_reg, reg);
+    diff1 = spu_sub(reg, orig_reg);
+    diff2 = spu_sub(orig_reg, reg);
+    sd = spu_sel(diff1, diff2, ineq);
+    uint8_t *s = (uint8_t *) sd;
+
+    return (int) s[0] + (int) s[1] + (int) s[2] + (int) s[3] + (int) s[4] + (int) s[5] + (int) s[6] + (int) s[7]
+        + (int) s[8] + (int) s[9] + (int) s[10] + (int) s[11] + (int) s[12] + (int) s[13] + (int) s[14] + (int) s[15];
+}
 
 int calc_sad(int x, int y) {
     int i, sum = 0;
     for (i = 0; i < 4; i++) {
         get_ref(x, y);
         sum += sad16((__vector unsigned char) (orig + 16*i));
+        y += 2;
     }
     return sum; 
 }
