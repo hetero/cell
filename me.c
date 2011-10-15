@@ -53,11 +53,13 @@ void spe_dispose() {
     int i, ret;
     for (i = 0; i < NUM_SPE; i++) {
         pthread_join(thread[i], NULL);
-        started[i] = 0;
-        ret = spe_context_destroy(spe[i]);
-        if (ret) {
-            perror("spe_context_destroy");
-            exit(1);
+        if (started[i]) {
+            started[i] = 0;
+            ret = spe_context_destroy(spe[i]);
+            if (ret) {
+                perror("spe_context_destroy");
+                exit(1);
+            }
         }
     }
 
@@ -106,8 +108,28 @@ void *run_sad_spe(void *thread_arg) {
 /* Motion estimation for 8x8 block */
 static void me_block_8x8(int spe_nr, struct c63_common *cm, int mb_x, int mb_y, uint8_t *orig, uint8_t *ref, int cc)
 {
-    if (started[spe_nr])
+    printf("orig = %x, mb_x = %d, mb_y = %d, cc = %d\n", (unsigned) orig, mb_x, mb_y, cc);
+    fflush(stdout);
+    if (started[spe_nr]) {
+        int ret;
         pthread_join(thread[spe_nr], NULL);
+        ret = spe_context_destroy(spe[spe_nr]);
+        if (ret) {
+            perror("spe_context_destroy");
+            exit(1);
+        }
+        spe[spe_nr] = spe_context_create(0, NULL);
+        if (!spe[spe_nr]) {
+            perror("spe_context_create");
+            exit(1);
+        }
+
+        ret = spe_program_load(spe[spe_nr], prog);
+        if (ret) {
+            perror("spe_program_load");
+            exit(1);
+        }
+    }
     started[spe_nr] = 1;
 
     struct macroblock *mb = &cm->curframe->mbs[cc][mb_y * cm->padw[cc]/8 + mb_x];
@@ -169,6 +191,7 @@ static void me_block_8x8(int spe_nr, struct c63_common *cm, int mb_x, int mb_y, 
 
 void c63_motion_estimate(struct c63_common *cm)
 {
+    spe_init();
     /* Compare this frame with previous reconstructed frame */
 
     int mb_x, mb_y, spe_nr = 0;
@@ -179,9 +202,12 @@ void c63_motion_estimate(struct c63_common *cm)
         for (mb_x=0; mb_x < cm->mb_cols; ++mb_x)
         {
             me_block_8x8(spe_nr, cm, mb_x, mb_y, cm->curframe->orig->Y, cm->refframe->recons->Y, 0);
-            spe_nr = (spe_nr + 1) % NUM_SPE;
+            //spe_nr = (spe_nr + 1) % NUM_SPE;
         }
     }
+
+    printf("Y done!\n");
+    fflush(stdout);
 
     /* Chroma */
     for (mb_y=0; mb_y < cm->mb_rows/2; ++mb_y)
@@ -189,11 +215,22 @@ void c63_motion_estimate(struct c63_common *cm)
         for (mb_x=0; mb_x < cm->mb_cols/2; ++mb_x)
         {
             me_block_8x8(spe_nr, cm, mb_x, mb_y, cm->curframe->orig->U, cm->refframe->recons->U, 1);
-            spe_nr = (spe_nr + 1) % NUM_SPE;
-            me_block_8x8(spe_nr, cm, mb_x, mb_y, cm->curframe->orig->V, cm->refframe->recons->V, 2);
-            spe_nr = (spe_nr + 1) % NUM_SPE;
+            //spe_nr = (spe_nr + 1) % NUM_SPE;
         }
     }
+    printf("U done!\n");
+    fflush(stdout);
+    for (mb_y=0; mb_y < cm->mb_rows/2; ++mb_y)
+    {
+        for (mb_x=0; mb_x < cm->mb_cols/2; ++mb_x)
+        {
+            me_block_8x8(spe_nr, cm, mb_x, mb_y, cm->curframe->orig->V, cm->refframe->recons->V, 2);
+            //spe_nr = (spe_nr + 1) % NUM_SPE;
+        }
+    }
+    printf("UV done!\n");
+    fflush(stdout);
+    spe_dispose();
 }
 
 /* Motion compensation for 8x8 block */
