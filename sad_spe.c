@@ -20,11 +20,16 @@
 
 typedef unsigned long long ULL;
 
+int i, j, tag, read_size, sum, best_sad, sad_tmp, best_dir;
+
 uint8_t orig_array[ORIG_WIDTH * ORIG_HEIGHT] __attribute__((aligned(128)));
 uint8_t ref_array[REF_WIDTH * REF_HEIGHT] __attribute__((aligned(128)));
 int sad[ORIG_WIDTH * ORIG_HEIGHT] __attribute__((aligned(128)));
 uint8_t *orig = orig_array;
 uint8_t *ref = ref_array;
+uint8_t read_tmp_array[16] __attribute__((aligned(16)));
+uint8_t *read_tmp;
+sad_params_t params __attribute__((aligned(128)));
 
 sad_out_t sad_out __attribute__((aligned(128)));
 
@@ -74,8 +79,8 @@ __vector unsigned char sd __attribute__((aligned(16)));
 
 
 void read_row(uint8_t *dst, ULL src, int size, int offset) {
-    int tag = 1;
-    int read_size = size + offset;
+    tag = 1;
+    read_size = size + offset;
     read_size += (16 - (read_size%16)) % 16;
     spu_mfcdma64(dst, mfc_ea2h(src), mfc_ea2l(src), 
             (read_size) * sizeof(uint8_t), tag, MFC_GET_CMD);
@@ -114,7 +119,7 @@ int sad16(uint8_t *orig_reg_scalar) {
 }
 
 int calc_sad(int x, int y) {
-    int i, sum = 0;
+    sum = 0;
     for (i = 0; i < 4; i++) {
         get_ref(x, y);
         sum += sad16(orig + 16*i);
@@ -134,7 +139,6 @@ int get_sad(int x, int y, const int *vec) {
 }
 
 void ds_init() {
-    int i;
     for (i = 0; i < sad_w * sad_h; ++i)
         sad[i] = -1;
 }
@@ -162,15 +166,13 @@ void mask_init() {
 }
 
 void small_ds(int x, int y) {
-    int i;
-    int best_sad = INT_MAX;
-    int best_dir = 0;
-    int sad;
+    best_sad = INT_MAX;
+    best_dir = 0;
     for (i = 0; i < 5; i++) {
-        sad = get_sad(x, y, &small_diamond[2 * i]);
-        if (sad < best_sad) {
+        sad_tmp = get_sad(x, y, &small_diamond[2 * i]);
+        if (sad_tmp < best_sad) {
             best_dir = i;
-            best_sad = sad;
+            best_sad = sad_tmp;
         }
     }
     sad_out.x = x + small_diamond[2 * best_dir];
@@ -179,15 +181,13 @@ void small_ds(int x, int y) {
 }
 
 void ds(int x, int y) {
-    int i;
-    int best_sad = INT_MAX;
-    int best_dir = 0;
-    int sad;
+    best_sad = INT_MAX;
+    best_dir = 0;
     for (i = 0; i < 9; i++) {
-        sad = get_sad(x, y, &big_diamond[2 * i]);
-        if (sad < best_sad) {
+        sad_tmp = get_sad(x, y, &big_diamond[2 * i]);
+        if (sad_tmp < best_sad) {
             best_dir = i;
-            best_sad = sad;
+            best_sad = sad_tmp;
         }
     }
     if (best_dir == 0) {
@@ -200,8 +200,7 @@ void ds(int x, int y) {
 
 int main(ULL spe, ULL argp, ULL envp) {
     mask_init();
-    int tag = 1, i;
-    sad_params_t params __attribute__((aligned(128)));
+    tag = 1;
     
     // GET params
     spu_mfcdma64(&params, mfc_ea2h(argp), mfc_ea2l(argp), sizeof(sad_params_t),
@@ -227,10 +226,8 @@ int main(ULL spe, ULL argp, ULL envp) {
 
     
     // GET orig
-    uint8_t read_tmp_array[16] __attribute__((aligned(16)));
-    uint8_t *read_tmp = read_tmp_array;
+    read_tmp = read_tmp_array;
     for (i = 0; i < ORIG_HEIGHT / 2; ++i) {
-        int j;
         printf("0: params.orig = %x, orig_offset = %d\n", (unsigned) params.orig, orig_offset);
         fflush(stdout);
         read_row(orig, params.orig, 8, orig_offset);
