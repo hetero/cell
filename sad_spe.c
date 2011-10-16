@@ -19,36 +19,25 @@
 }
 */
 
-uint32_t mbox_data[4] __attribute__((aligned(128)));
 
 uint8_t orig_array[ORIG_WIDTH * ORIG_HEIGHT] __attribute__((aligned(128)));
 uint8_t ref_array[REF_WIDTH * REF_HEIGHT] __attribute__((aligned(128)));
-int sad[SAD_WIDTH * SAD_HEIGHT] __attribute__((aligned(128)));
-uint8_t *orig;
-uint8_t *ref;
 uint8_t read_tmp_array[256] __attribute__((aligned(128)));
-uint8_t *read_tmp;
-sad_params_t params __attribute__((aligned(128)));
+int sad[SAD_WIDTH * SAD_HEIGHT] __attribute__((aligned(128)));
 
+sad_params_t params __attribute__((aligned(128)));
 sad_out_t sad_out __attribute__((aligned(128)));
 
-int w __attribute__((aligned(128)));
-int wm128 __attribute__((aligned(128)));
-int orig_offset __attribute__((aligned(128)));
-int ref_offset __attribute__((aligned(128)));
-int orig_x __attribute__((aligned(128)));
-int orig_y __attribute__((aligned(128)));
-int ref_w __attribute__((aligned(128)));
-int ref_h __attribute__((aligned(128)));
-int sad_w __attribute__((aligned(128)));
-int sad_h __attribute__((aligned(128)));
+uint8_t *orig;
+uint8_t *ref;
+uint8_t *read_tmp;
 
-const int *big_diamond = big_diamond_array;
-const int *small_diamond = small_diamond_array;
+unsigned mbox_data[4];
+int w, wm128, orig_offset, ref_offset, orig_x, orig_y, ref_w, ref_h, sad_w, sad_h;
 
-VUC reg __attribute__((aligned(16)));
-VUC tmp __attribute__((aligned(16)));
-VUC sd __attribute__((aligned(16)));
+VUC reg;
+VUC tmp;
+VUC sd;
 
 void read_row(uint8_t *dst, ULL src, int size, int offset) {
     int i, tag = 1;
@@ -67,14 +56,14 @@ void get_ref(int x, int y) {
     int offset2 = (offset1 + ref_w) % 16;
     uint8_t *ref_ptr = &ref[y*ref_w + x - offset1];
 
-    __vector unsigned char *ref_ptr1 = (__vector unsigned char *) ref_ptr;
-    __vector unsigned char *ref_ptr2 = (__vector unsigned char *) (ref_ptr + 16);
+    VUC *ref_ptr1 = (VUC *) ref_ptr;
+    VUC *ref_ptr2 = (VUC *) (ref_ptr + 16);
 
     reg = spu_shuffle(*ref_ptr1, *ref_ptr2,  mask[offset1]);
 
     ref_ptr = &ref[(y+1)*ref_w + x - offset2];
-    ref_ptr1 = (__vector unsigned char *) ref_ptr;
-    ref_ptr2 = (__vector unsigned char *) (ref_ptr + 16);
+    ref_ptr1 = (VUC *) ref_ptr;
+    ref_ptr2 = (VUC *) (ref_ptr + 16);
 
     tmp = spu_shuffle(*ref_ptr1, *ref_ptr2, mask[offset2]);
 
@@ -82,8 +71,8 @@ void get_ref(int x, int y) {
 }
 
 int sad16(uint8_t *orig_reg_scalar) {
-    __vector unsigned char orig_reg = 
-        *((__vector unsigned char *) orig_reg_scalar);
+    VUC orig_reg = 
+        *((VUC *) orig_reg_scalar);
 
     sd = spu_absd(orig_reg, reg);
     uint8_t *s = (uint8_t *) &sd;

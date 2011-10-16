@@ -45,4 +45,7 @@ const int small_diamond_array[5 * 2] = {
      0, -1
 };
 
+const int *big_diamond = big_diamond_array;
+const int *small_diamond = small_diamond_array;
+
 #endif

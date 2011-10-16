@@ -22,7 +22,7 @@ int thread_started[NUM_SPE] = {0};
 
 void *run_sad_spe(void *thread_arg) {
     thread_arg_t *arg = (thread_arg_t *) thread_arg;
-    unsigned mbox_data[4] __attribute__((aligned(128)));
+    unsigned mbox_data[4];
     ULL params = (unsigned long) (arg->params);
     mbox_data[0] = mbox_data[1] = 0;
     mbox_data[2] = (unsigned) (params >> 32);
