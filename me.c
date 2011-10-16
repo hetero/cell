@@ -13,76 +13,34 @@
 #include "c63.h"
 #include "ppe.h"
 
-#define NUM_SPE 8
+#define NUM_SPE 1
 
-int started[NUM_SPE];
 sad_out_t spe_out[NUM_SPE] __attribute__((aligned(128)));
 sad_params_t sad_params[NUM_SPE] __attribute__((aligned(128)));
 
-spe_context_ptr_t spe[NUM_SPE];
 pthread_t thread[NUM_SPE];
-thread_arg_t arg[NUM_SPE];
-
-spe_program_handle_t *prog;
-
-void spe_init() {
-    int i, ret;
-    prog = spe_image_open("sad_spe.elf");
-    if (!prog) {
-        perror("spe_image_open");
-        exit(1);
-    }
-
-    for (i = 0; i < NUM_SPE; i++) {
-        started[i] = 0;
-        spe[i] = spe_context_create(0, NULL);
-        if (!spe[i]) {
-            perror("spe_context_create");
-            exit(1);
-        }
-
-        ret = spe_program_load(spe[i], prog);
-        if (ret) {
-            perror("spe_program_load");
-            exit(1);
-        }
-    }
-}
-
-void spe_dispose() {    
-    int i, ret;
-    for (i = 0; i < NUM_SPE; i++) {
-        pthread_join(thread[i], NULL);
-        if (started[i]) {
-            started[i] = 0;
-            ret = spe_context_destroy(spe[i]);
-            if (ret) {
-                perror("spe_context_destroy");
-                exit(1);
-            }
-        }
-    }
-
-    ret = spe_image_close(prog);
-    if (ret) {
-        perror("spe_image_close");
-        exit(1);
-    }
-}
+thread_arg_t th_arg[NUM_SPE];
+int thread_started[NUM_SPE] = {0};
 
 void *run_sad_spe(void *thread_arg) {
-    int ret;
     thread_arg_t *arg = (thread_arg_t *) thread_arg;
-    unsigned int entry;
-    spe_stop_info_t stop_info;
-
-    entry = SPE_DEFAULT_ENTRY;
-    ret = spe_context_run(arg->spe, &entry, 0, arg->params, NULL, &stop_info);
-    if (ret < 0) {
-        perror("spe_context_run");
-        return NULL;
+    unsigned mbox_data[4] __attribute__((aligned(128)));
+    ULL params = (unsigned long) (arg->params);
+    mbox_data[0] = mbox_data[1] = 0;
+    mbox_data[2] = (unsigned) (params >> 32);
+    mbox_data[3] = (unsigned) (params);
+    
+    // send params to SPE
+    spe_in_mbox_write (arg->spe, mbox_data, 4, SPE_MBOX_ALL_BLOCKING);
+    
+    // wait for SPE's response
+    spe_out_intr_mbox_read (arg->spe, mbox_data, 1, SPE_MBOX_ALL_BLOCKING);
+    if (mbox_data[0] != SPE_FINISH) {
+        printf("Unknown SPE response: %u\n", mbox_data[0]);
+        perror("Unknown SPE response");
+        exit(EXIT_FAILURE);
     }
-
+    
     sad_out_t *sad_out = (sad_out_t *) (unsigned long) (arg->params->sad_out);
     struct macroblock *mb = (struct macroblock *) (unsigned long) (arg->params->mb);
 
@@ -108,29 +66,13 @@ void *run_sad_spe(void *thread_arg) {
 /* Motion estimation for 8x8 block */
 static void me_block_8x8(int spe_nr, struct c63_common *cm, int mb_x, int mb_y, uint8_t *orig, uint8_t *ref, int cc)
 {
-    printf("orig = %x, mb_x = %d, mb_y = %d, cc = %d\n", (unsigned) orig, mb_x, mb_y, cc);
-    fflush(stdout);
-    if (started[spe_nr]) {
-        int ret;
+    /*printf("\norig = %x, mb_x = %d, mb_y = %d, cc = %d\n", (unsigned) orig, mb_x, mb_y, cc);
+    fflush(stdout);*/
+    
+    if (thread_started[spe_nr])
         pthread_join(thread[spe_nr], NULL);
-        ret = spe_context_destroy(spe[spe_nr]);
-        if (ret) {
-            perror("spe_context_destroy");
-            exit(1);
-        }
-        spe[spe_nr] = spe_context_create(0, NULL);
-        if (!spe[spe_nr]) {
-            perror("spe_context_create");
-            exit(1);
-        }
 
-        ret = spe_program_load(spe[spe_nr], prog);
-        if (ret) {
-            perror("spe_program_load");
-            exit(1);
-        }
-    }
-    started[spe_nr] = 1;
+    thread_started[spe_nr] = 1;
 
     struct macroblock *mb = &cm->curframe->mbs[cc][mb_y * cm->padw[cc]/8 + mb_x];
 
@@ -179,10 +121,10 @@ static void me_block_8x8(int spe_nr, struct c63_common *cm, int mb_x, int mb_y, 
     sad_params[spe_nr].w = w;
     sad_params[spe_nr].wm128 = w % 128;
 
-    arg[spe_nr].spe = spe[spe_nr];
-    arg[spe_nr].params = &sad_params[spe_nr];
+    th_arg[spe_nr].spe = spe[spe_nr];
+    th_arg[spe_nr].params = &sad_params[spe_nr];
     
-    int ret = pthread_create(&thread[spe_nr], NULL, run_sad_spe, &arg[spe_nr]);
+    int ret = pthread_create(&thread[spe_nr], NULL, run_sad_spe, &th_arg[spe_nr]);
     if (ret) {
         perror("pthread_create");
         exit(1);
@@ -191,7 +133,6 @@ static void me_block_8x8(int spe_nr, struct c63_common *cm, int mb_x, int mb_y, 
 
 void c63_motion_estimate(struct c63_common *cm)
 {
-    spe_init();
     /* Compare this frame with previous reconstructed frame */
 
     int mb_x, mb_y, spe_nr = 0;
@@ -202,12 +143,9 @@ void c63_motion_estimate(struct c63_common *cm)
         for (mb_x=0; mb_x < cm->mb_cols; ++mb_x)
         {
             me_block_8x8(spe_nr, cm, mb_x, mb_y, cm->curframe->orig->Y, cm->refframe->recons->Y, 0);
-            //spe_nr = (spe_nr + 1) % NUM_SPE;
+            spe_nr = (spe_nr + 1) % NUM_SPE;
         }
     }
-
-    printf("Y done!\n");
-    fflush(stdout);
 
     /* Chroma */
     for (mb_y=0; mb_y < cm->mb_rows/2; ++mb_y)
@@ -215,22 +153,17 @@ void c63_motion_estimate(struct c63_common *cm)
         for (mb_x=0; mb_x < cm->mb_cols/2; ++mb_x)
         {
             me_block_8x8(spe_nr, cm, mb_x, mb_y, cm->curframe->orig->U, cm->refframe->recons->U, 1);
-            //spe_nr = (spe_nr + 1) % NUM_SPE;
+            spe_nr = (spe_nr + 1) % NUM_SPE;
         }
     }
-    printf("U done!\n");
-    fflush(stdout);
     for (mb_y=0; mb_y < cm->mb_rows/2; ++mb_y)
     {
         for (mb_x=0; mb_x < cm->mb_cols/2; ++mb_x)
         {
             me_block_8x8(spe_nr, cm, mb_x, mb_y, cm->curframe->orig->V, cm->refframe->recons->V, 2);
-            //spe_nr = (spe_nr + 1) % NUM_SPE;
+            spe_nr = (spe_nr + 1) % NUM_SPE;
         }
     }
-    printf("UV done!\n");
-    fflush(stdout);
-    spe_dispose();
 }
 
 /* Motion compensation for 8x8 block */

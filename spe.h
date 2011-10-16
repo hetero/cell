@@ -1,6 +1,10 @@
 #ifndef SPE_H
 #define SPE_H
 
+#define NUM_SPE 1
+#define SPE_END 1
+#define SPE_FINISH 2
+
 typedef struct {
             int sad, x, y, pad;
 } sad_out_t;
@@ -19,5 +23,7 @@ typedef struct {
     int ref_w;
     int ref_h;
 } sad_params_t;
+
+typedef unsigned long long ULL;
 
 #endif

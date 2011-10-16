@@ -10,24 +10,23 @@
 #define SAD_WIDTH 32
 #define SAD_HEIGHT 32
 
-
+/*
 #define spu_mfcdma64(ls, h, l, sz, tag, cmd) { \
         printf("spu_mfcdma64(%p, %x, %x, %lu, %d, %d) -- Line: %d\n", ls, h, l, sz, tag, cmd, __LINE__); \
     fflush(stdout); \
         spu_mfcdma64(ls, h, l, sz, tag, cmd); \
 }
+*/
 
-
-typedef unsigned long long ULL;
-
-int i, j, tag, read_size, sum, best_sad, sad_tmp, best_dir;
+int tag, read_size, sum, best_sad, sad_tmp, best_dir;
+uint32_t mbox_data[4] __attribute__((aligned(128)));
 
 uint8_t orig_array[ORIG_WIDTH * ORIG_HEIGHT] __attribute__((aligned(128)));
 uint8_t ref_array[REF_WIDTH * REF_HEIGHT] __attribute__((aligned(128)));
-int sad[ORIG_WIDTH * ORIG_HEIGHT] __attribute__((aligned(128)));
-uint8_t *orig = orig_array;
-uint8_t *ref = ref_array;
-uint8_t read_tmp_array[16] __attribute__((aligned(16)));
+int sad[SAD_WIDTH * SAD_HEIGHT] __attribute__((aligned(128)));
+uint8_t *orig;
+uint8_t *ref;
+uint8_t read_tmp_array[256] __attribute__((aligned(128)));
 uint8_t *read_tmp;
 sad_params_t params __attribute__((aligned(128)));
 
@@ -79,13 +78,16 @@ __vector unsigned char sd __attribute__((aligned(16)));
 
 
 void read_row(uint8_t *dst, ULL src, int size, int offset) {
+    int i;
     tag = 1;
     read_size = size + offset;
     read_size += (16 - (read_size%16)) % 16;
-    spu_mfcdma64(dst, mfc_ea2h(src), mfc_ea2l(src), 
+    spu_mfcdma64(read_tmp, mfc_ea2h(src), mfc_ea2l(src), 
             (read_size) * sizeof(uint8_t), tag, MFC_GET_CMD);
     spu_writech(MFC_WrTagMask, 1 << tag);
     spu_mfcstat(MFC_TAG_UPDATE_ALL);
+    for (i = 0; i < size; ++i)
+        dst[i] = read_tmp[offset + i];
 }
 
 void get_ref(int x, int y) {
@@ -111,6 +113,15 @@ void get_ref(int x, int y) {
 int sad16(uint8_t *orig_reg_scalar) {
     __vector unsigned char orig_reg = 
         *((__vector unsigned char *) orig_reg_scalar);
+    ////
+    uint8_t *reg_char = (uint8_t *) &reg;
+    int i;
+    for (i = 0; i < 16; i++) 
+        printf("(%d,%d) ",orig_reg_scalar[i],reg_char[i]);
+    printf("\n");
+    ////
+
+
     sd = spu_absd(orig_reg, reg);
     uint8_t *s = (uint8_t *) &sd;
 
@@ -119,12 +130,14 @@ int sad16(uint8_t *orig_reg_scalar) {
 }
 
 int calc_sad(int x, int y) {
+    int i;
     sum = 0;
     for (i = 0; i < 4; i++) {
         get_ref(x, y);
         sum += sad16(orig + 16*i);
         y += 2;
     }
+    printf("sad(%d,%d)=%d\n",x,y,sum);
     return sum; 
 }
 
@@ -139,6 +152,7 @@ int get_sad(int x, int y, const int *vec) {
 }
 
 void ds_init() {
+    int i;
     for (i = 0; i < sad_w * sad_h; ++i)
         sad[i] = -1;
 }
@@ -166,6 +180,8 @@ void mask_init() {
 }
 
 void small_ds(int x, int y) {
+    printf("small_ds(%d,%d)\n",x,y);
+    int i;
     best_sad = INT_MAX;
     best_dir = 0;
     for (i = 0; i < 5; i++) {
@@ -181,6 +197,8 @@ void small_ds(int x, int y) {
 }
 
 void ds(int x, int y) {
+    int i;
+    printf("ds(%d, %d)\n",x,y);
     best_sad = INT_MAX;
     best_dir = 0;
     for (i = 0; i < 9; i++) {
@@ -201,77 +219,79 @@ void ds(int x, int y) {
 int main(ULL spe, ULL argp, ULL envp) {
     mask_init();
     tag = 1;
-    
-    // GET params
-    spu_mfcdma64(&params, mfc_ea2h(argp), mfc_ea2l(argp), sizeof(sad_params_t),
-            tag, MFC_GET_CMD);
-    spu_writech(MFC_WrTagMask, 1 << tag);
-    spu_mfcstat(MFC_TAG_UPDATE_ALL);
-    
-    // GET ints
-    w = params.w;
-    wm128 = params.wm128;
-    orig_offset = params.orig_offset;
-    ref_offset = params.ref_offset;
-    orig_x = params.orig_x;
-    orig_y = params.orig_y;
-    ref_w = params.ref_w;
-    ref_h = params.ref_w;
-    sad_w = ref_w - 7;
-    sad_h = ref_h - 7;
+    while(1) {
+        orig = orig_array;
+        ref = ref_array;
+        read_tmp = read_tmp_array;
+        printf("Before reading...\n");
+        mbox_data[0] = spu_read_in_mbox();
+        mbox_data[1] = spu_read_in_mbox();
+        mbox_data[2] = spu_read_in_mbox();
+        mbox_data[3] = spu_read_in_mbox();
+        printf("4 messages read...\n");
 
-    printf("o=%x\to_x=%d\to_y=%d\to_o=%d\tr_o=%d\tr_w=%d\tr_h=%d\n",
-            (unsigned) params.orig,orig_x,orig_y,orig_offset,ref_offset,
-            ref_w,ref_h);
+        if (mbox_data[0] == SPE_END)
+            break;
 
-    
-    // GET orig
-    read_tmp = read_tmp_array;
-    for (i = 0; i < ORIG_HEIGHT / 2; ++i) {
-        printf("0: params.orig = %x, orig_offset = %d\n", (unsigned) params.orig, orig_offset);
-        fflush(stdout);
-        read_row(orig, params.orig, 8, orig_offset);
-        printf("1: params.orig = %x, orig_offset = %d\n", (unsigned) params.orig, orig_offset);
-        fflush(stdout);
-        params.orig += w + orig_offset;
-        orig_offset = params.orig % 128;
-        params.orig -= orig_offset;
-        printf("2: params.orig = %x, orig_offset = %d\n", (unsigned) params.orig, orig_offset);
-        fflush(stdout);
+        // GET params
+        spu_mfcdma64(&params, mbox_data[2], mbox_data[3], sizeof(sad_params_t),
+                tag, MFC_GET_CMD);
+        spu_writech(MFC_WrTagMask, 1 << tag);
+        spu_mfcstat(MFC_TAG_UPDATE_ALL);
         
-        read_row(read_tmp, params.orig, 8, orig_offset);
-        printf("2.1: params.orig = %x, orig_offset = %d\n", (unsigned) params.orig, orig_offset);
-        fflush(stdout);
-        //TODO na wektory
-        for (j = 0; j < 8; ++j)
-            orig[8+j] = read_tmp[j];
+        // GET ints
+        w = params.w;
+        wm128 = params.wm128;
+        orig_offset = params.orig_offset;
+        ref_offset = params.ref_offset;
+        orig_x = params.orig_x;
+        orig_y = params.orig_y;
+        ref_w = params.ref_w;
+        ref_h = params.ref_h;
+        sad_w = ref_w - 7;
+        sad_h = ref_h - 7;
 
-        orig = (uint8_t *)orig + 2 * ORIG_WIDTH;
-        params.orig += w + orig_offset;
-        orig_offset = params.orig % 128;
-        params.orig -= orig_offset;
-        printf("3: params.orig = %x, orig_offset = %d\n", (unsigned) params.orig, orig_offset);
-        fflush(stdout);
+        printf("o=%x\to_x=%d\to_y=%d\to_o=%d\tr_o=%d\tr_w=%d\tr_h=%d\n",
+                (unsigned) params.orig,orig_x,orig_y,orig_offset,ref_offset,
+                ref_w,ref_h);
+
+        
+        // GET orig
+        int i;
+        for (i = 0; i < ORIG_HEIGHT; ++i) {
+            read_row(orig, params.orig, 8, orig_offset);
+            orig += ORIG_WIDTH;
+            params.orig += w + orig_offset;
+            orig_offset = params.orig % 128;
+            params.orig -= orig_offset;
+        }
+        
+        //printf("after get orig\n\n");
+
+        // GET ref
+        for (i = 0; i < ref_h; ++i) {
+            read_row(ref, params.ref, ref_w, ref_offset);
+            ref += REF_WIDTH;
+            params.ref += w + ref_offset;
+            ref_offset = params.ref % 128;
+            params.ref -= ref_offset;
+        }
+        //printf("after get orig\n\n");
+
+        ref = ref_array;
+        orig = orig_array;
+
+        // calc
+        ds_init();
+        ds(orig_x, orig_y);
+
+        // PUT sad_out
+        /*spu_mfcdma64(&sad_out, mfc_ea2h(params.sad_out), mfc_ea2l(params.sad_out),
+                sizeof(sad_out_t), tag, MFC_PUT_CMD);
+        spu_writech(MFC_WrTagMask, 1 << tag);
+        spu_mfcstat(MFC_TAG_UPDATE_ALL);
+    */
+        spu_write_out_intr_mbox ((unsigned) SPE_FINISH);
     }
-    
-    // GET ref
-    for (i = 0; i < ref_h; ++i) {
-        //read_row(ref, params.ref, ref_w, ref_offset);
-        ref += REF_WIDTH;
-        params.ref += w + ref_offset;
-        ref_offset = params.ref % 128;
-        params.ref -= ref_offset;
-    }
-
-    // calc
-    //ds_init();
-    //ds(orig_x, orig_y);
-
-    // PUT sad_out
-    /*spu_mfcdma64(&sad_out, mfc_ea2h(params.sad_out), mfc_ea2l(params.sad_out),
-            sizeof(sad_out_t), tag, MFC_PUT_CMD);
-    spu_writech(MFC_WrTagMask, 1 << tag);
-    spu_mfcstat(MFC_TAG_UPDATE_ALL);
-*/
     return 0;
 }

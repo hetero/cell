@@ -7,9 +7,11 @@
 #include <math.h>
 #include <assert.h>
 #include <limits.h>
+#include <pthread.h>
 
 #include "c63.h"
 #include "tables.h"
+#include "ppe.h"
 
 
 static char *output_file, *input_file;
@@ -30,6 +32,10 @@ static uint32_t vpw;
 /* getopt */
 extern int optind;
 extern char *optarg;
+
+spe_program_handle_t *prog;
+pthread_t run_thread[NUM_SPE];
+thread_arg_t run_arg[NUM_SPE];
 
 /* Read YUV frames */
 static yuv_t* read_yuv(FILE *file)
@@ -77,8 +83,74 @@ static yuv_t* read_yuv(FILE *file)
     return image;
 }
 
+void *run_spe(void *thread_arg) {
+    int ret;
+    thread_arg_t *arg = (thread_arg_t *) thread_arg;
+    unsigned int entry;
+    spe_stop_info_t stop_info;
 
+    entry = SPE_DEFAULT_ENTRY;
+    printf("Running SPE...\n");
+    ret = spe_context_run(arg->spe, &entry, 0, NULL, NULL, &stop_info);
+    if (ret < 0) {
+        perror("spe_context_run");
+        return NULL;
+    }
 
+    return NULL;
+}
+
+void spe_init() {
+    int i, ret;
+    prog = spe_image_open("sad_spe.elf");
+    if (!prog) {
+        perror("spe_image_open");
+        exit(1);
+    }   
+
+    for (i = 0; i < NUM_SPE; i++) {
+        spe[i] = spe_context_create(0, NULL);
+        if (!spe[i]) {
+            perror("spe_context_create");
+            exit(1);
+        }   
+
+        ret = spe_program_load(spe[i], prog);
+        if (ret) {
+            perror("spe_program_load");
+            exit(1);
+        }
+        run_arg[i].spe = spe[i];
+        ret = pthread_create(&run_thread[i], NULL, run_spe, &run_arg[i]);
+        if (ret) {
+            perror("run_pthread_create");
+            exit(1);
+        }   
+    }   
+}
+
+void spe_dispose() {    
+    int i, ret;
+    for (i = 0; i < NUM_SPE; i++) {
+        unsigned int mbox_data[4];
+        mbox_data[0] = SPE_END;
+        mbox_data[1] = mbox_data[2] = mbox_data[3] = 0;
+        spe_in_mbox_write(spe[i], mbox_data, 4, SPE_MBOX_ALL_BLOCKING);
+
+        pthread_join(run_thread[i], NULL);
+        ret = spe_context_destroy(spe[i]);
+        if (ret) {
+            perror("spe_context_destroy");
+            exit(1);
+        }
+    }
+
+    ret = spe_image_close(prog);
+    if (ret) {
+        perror("spe_image_close");
+        exit(1);
+    }
+}
 
 static void c63_encode_image(struct c63_common *cm, yuv_t *image)
 {
@@ -222,6 +294,7 @@ int main(int argc, char **argv)
 
 //    predfile = fopen("/tmp/pred.yuv", "wb");
 
+    spe_init();
 
     struct c63_common *cm = init_c63_enc(width, height);
     cm->e_ctx.fp = outfile;
@@ -277,6 +350,6 @@ int main(int argc, char **argv)
     fclose(outfile);
     fclose(infile);
 //    fclose(predfile);
-
+    spe_dispose();
     return EXIT_SUCCESS;
 }
