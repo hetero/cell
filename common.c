@@ -151,8 +151,8 @@ struct frame* create_frame(struct c63_common *cm, yuv_t *image)
        cm->vpw * cm->vph * sizeof(struct macroblock));
 
     memset(f->mbs[0], 0, cm->ypw * cm->yph * sizeof(struct macroblock));
-    memset(f->mbs[0], 0, cm->upw * cm->uph * sizeof(struct macroblock));
-    memset(f->mbs[0], 0, cm->vpw * cm->vph * sizeof(struct macroblock));
+    memset(f->mbs[1], 0, cm->upw * cm->uph * sizeof(struct macroblock));
+    memset(f->mbs[2], 0, cm->vpw * cm->vph * sizeof(struct macroblock));
 
     return f;
 }

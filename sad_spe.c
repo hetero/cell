@@ -4,7 +4,8 @@
 #include "spe.h"
 #include "spe_only.h"
 
-#define REF_WIDTH 39
+#define REF_WIDTH 48
+#define VEC_REF_WIDTH REF_WIDTH / 16;
 #define REF_HEIGHT 39
 #define ORIG_WIDTH 8
 #define ORIG_HEIGHT 8
@@ -25,12 +26,11 @@ uint8_t ref_array[REF_WIDTH * REF_HEIGHT] __attribute__((aligned(128)));
 uint8_t read_tmp_array[256] __attribute__((aligned(128)));
 int sad[SAD_WIDTH * SAD_HEIGHT] __attribute__((aligned(128)));
 
-sad_params_t params __attribute__((aligned(128)));
 sad_out_t sad_out __attribute__((aligned(128)));
 
-uint8_t *orig;
-uint8_t *ref;
-uint8_t *read_tmp;
+VUC *orig;
+VUC *ref;
+VUC *read_tmp;
 
 unsigned mbox_data[4];
 int w, wm128, orig_offset, ref_offset, orig_x, orig_y, ref_w, ref_h, sad_w, sad_h;
@@ -52,16 +52,16 @@ void read_row(uint8_t *dst, ULL src, int size, int offset) {
 }
 
 void get_ref(int x, int y) {
-    int offset1 = (y*ref_w + x) % 16;
-    int offset2 = (offset1 + ref_w) % 16;
-    uint8_t *ref_ptr = &ref[y*ref_w + x - offset1];
+    int offset1 = (y*REF_WIDTH + x) % 16;
+    int offset2 = (offset1 + REF_WIDTH) % 16;
+    uint8_t *ref_ptr = &ref[y*REF_WIDTH + x - offset1];
 
     VUC *ref_ptr1 = (VUC *) ref_ptr;
     VUC *ref_ptr2 = (VUC *) (ref_ptr + 16);
 
     reg = spu_shuffle(*ref_ptr1, *ref_ptr2,  mask[offset1]);
 
-    ref_ptr = &ref[(y+1)*ref_w + x - offset2];
+    ref_ptr = &ref[(y+1)*REF_WIDTH + x - offset2];
     ref_ptr1 = (VUC *) ref_ptr;
     ref_ptr2 = (VUC *) (ref_ptr + 16);
 
@@ -146,11 +146,14 @@ void ds(int x, int y) {
 }
 
 int main(ULL spe, ULL argp, ULL envp) {
-    int tag = 1;
+    sad_params_t params __attribute__((aligned(128)));
+    int tag = 1, i, j;
+
     while(1) {
-        orig = orig_array;
-        ref = ref_array;
-        read_tmp = read_tmp_array;
+        orig = (VUC *) orig_array;
+        ref = (VUC *) ref_array;
+        read_tmp = (VUC *) read_tmp_array;
+
         mbox_data[0] = spu_read_in_mbox();
         mbox_data[1] = spu_read_in_mbox();
         mbox_data[2] = spu_read_in_mbox();
@@ -177,20 +180,45 @@ int main(ULL spe, ULL argp, ULL envp) {
         sad_w = ref_w - 7;
         sad_h = ref_h - 7;
 
-        // GET orig
-        int i;
-        for (i = 0; i < ORIG_HEIGHT; ++i) {
-            read_row(orig, params.orig, 8, orig_offset);
-            orig += ORIG_WIDTH;
+        // GET orig (two rows in each loop step)
+        for (i = 0; i < ORIG_HEIGHT / 2; ++i) {
+            // read 8 bytes and everything on the left to 128 boundary
+            read_row(read_tmp, params.orig, 8, orig_offset);
+            // shift and copy to orig[i]
+            orig[i] = spe_shuffle(read_tmp[orig_offset / 8],
+                    read_tmp[orig_offset / 8 + 1], mask[orig_offset % 8]);
+            // jump to next row in input
+            params.orig += w + orig_offset;
+            orig_offset = params.orig % 128;
+            params.orig -= orig_offset;
+
+            // read 8 bytes
+            read_row(read_tmp, params.orig, 8, orig_offset);
+            // shift
+            read_tmp[0] = spe_shuffle(read_tmp[orig_offset / 8],
+                    read_tmp[orig_offset / 8 + 1], mask[orig_offset % 8]);
+            // merge
+            orig[i] = spe_shuffle(orig[i], read_tmp[0], merge_mask);
+            // jump to next row in input
             params.orig += w + orig_offset;
             orig_offset = params.orig % 128;
             params.orig -= orig_offset;
         }
         
         // GET ref
+        int vectors = ref_w / 16 + (ref_w % 16 > 0);
         for (i = 0; i < ref_h; ++i) {
-            read_row(ref, params.ref, ref_w, ref_offset);
-            ref += ref_w;
+            // read row of input (and shit on the left)
+            read_row(read_tmp, params.ref, ref_w, ref_offset);
+            // shift block by block
+            for (j = 0; j < vectors; ++j) {
+                // first block (8) in vector (16)
+                ref[i * VEC_REF_WIDTH + j] = spe_shuffle(
+                        read_tmp[ref_offset / 8 + j],
+                        read_tmp[ref_offset / 8 + j + 1],
+                        mask[ref_offset % 8]);
+                // shift
+
             params.ref += w + ref_offset;
             ref_offset = params.ref % 128;
             params.ref -= ref_offset;
