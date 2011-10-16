@@ -1,7 +1,7 @@
 #ifndef SPE_H
 #define SPE_H
 
-#define NUM_SPE 1
+#define NUM_SPE 8
 #define SPE_END 1
 #define SPE_FINISH 2
 

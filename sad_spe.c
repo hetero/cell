@@ -3,7 +3,7 @@
 #include <spu_intrinsics.h>
 #include "spe.h"
 
-#define REF_WIDTH 128
+#define REF_WIDTH 39
 #define REF_HEIGHT 39
 #define ORIG_WIDTH 8
 #define ORIG_HEIGHT 8
@@ -93,34 +93,52 @@ void read_row(uint8_t *dst, ULL src, int size, int offset) {
 void get_ref(int x, int y) {
     int offset1 = (y*ref_w + x) % 16;
     int offset2 = (offset1 + ref_w) % 16;
-
     uint8_t *ref_ptr = &ref[y*ref_w + x - offset1];
+
+    //printf("x = %d, y = %d, ref_w = %d\n",x,y,ref_w);
 
     __vector unsigned char *ref_ptr1 = (__vector unsigned char *) ref_ptr;
     __vector unsigned char *ref_ptr2 = (__vector unsigned char *) (ref_ptr + 16);
 
     reg = spu_shuffle(*ref_ptr1, *ref_ptr2,  mask[offset1]);
 
+    /*uint8_t *reg_char = (uint8_t *) &reg;
+    printf("of1 = %d, of2 = %d\n", offset1, offset2);
+    printf("reg1 = ");
+    for (i = 0; i < 16; i++)
+        printf("%d ", reg_char[i]);
+    printf("\n");
+*/
     ref_ptr = &ref[(y+1)*ref_w + x - offset2];
     ref_ptr1 = (__vector unsigned char *) ref_ptr;
     ref_ptr2 = (__vector unsigned char *) (ref_ptr + 16);
 
     tmp = spu_shuffle(*ref_ptr1, *ref_ptr2, mask[offset2]);
 
+  /*  uint8_t *tmp_char = (uint8_t *) &tmp;
+    printf("tmp = ");
+    for (i = 0; i < 16; i++)
+        printf("%d ", tmp_char[i]);
+    printf("\n");
+*/
     reg = spu_shuffle(reg, tmp, merge_mask);
+  /*  printf("reg2 = ");
+    for (i = 0; i < 16; i++)
+        printf("%d ", reg_char[i]);
+    printf("\n");*/
 }
 
 int sad16(uint8_t *orig_reg_scalar) {
     __vector unsigned char orig_reg = 
         *((__vector unsigned char *) orig_reg_scalar);
-    ////
+/*    ////
     uint8_t *reg_char = (uint8_t *) &reg;
     int i;
     for (i = 0; i < 16; i++) 
         printf("(%d,%d) ",orig_reg_scalar[i],reg_char[i]);
     printf("\n");
     ////
-
+*/
 
     sd = spu_absd(orig_reg, reg);
     uint8_t *s = (uint8_t *) &sd;
@@ -137,7 +155,6 @@ int calc_sad(int x, int y) {
         sum += sad16(orig + 16*i);
         y += 2;
     }
-    printf("sad(%d,%d)=%d\n",x,y,sum);
     return sum; 
 }
 
@@ -180,7 +197,7 @@ void mask_init() {
 }
 
 void small_ds(int x, int y) {
-    printf("small_ds(%d,%d)\n",x,y);
+//    printf("small_ds(%d,%d)\n",x,y);
     int i;
     best_sad = INT_MAX;
     best_dir = 0;
@@ -198,11 +215,13 @@ void small_ds(int x, int y) {
 
 void ds(int x, int y) {
     int i;
-    printf("ds(%d, %d)\n",x,y);
+//    printf("ds(%d, %d)\n",x,y);
     best_sad = INT_MAX;
     best_dir = 0;
     for (i = 0; i < 9; i++) {
         sad_tmp = get_sad(x, y, &big_diamond[2 * i]);
+    /*    printf("sad(%d,%d)=%d\n",x+big_diamond[2*i],
+                y+big_diamond[2*i+1],sad_tmp);*/
         if (sad_tmp < best_sad) {
             best_dir = i;
             best_sad = sad_tmp;
@@ -212,7 +231,7 @@ void ds(int x, int y) {
         small_ds(x, y);
     }
     else {
-        ds(x + big_diamond[2 * best_dir], y + big_diamond[2 * best_dir]);
+        ds(x + big_diamond[2 * best_dir], y + big_diamond[2 * best_dir + 1]);
     }
 }
 
@@ -223,12 +242,12 @@ int main(ULL spe, ULL argp, ULL envp) {
         orig = orig_array;
         ref = ref_array;
         read_tmp = read_tmp_array;
-        printf("Before reading...\n");
+//        printf("Before reading...\n");
         mbox_data[0] = spu_read_in_mbox();
         mbox_data[1] = spu_read_in_mbox();
         mbox_data[2] = spu_read_in_mbox();
         mbox_data[3] = spu_read_in_mbox();
-        printf("4 messages read...\n");
+  //      printf("4 messages read...\n");
 
         if (mbox_data[0] == SPE_END)
             break;
@@ -251,10 +270,10 @@ int main(ULL spe, ULL argp, ULL envp) {
         sad_w = ref_w - 7;
         sad_h = ref_h - 7;
 
-        printf("o=%x\to_x=%d\to_y=%d\to_o=%d\tr_o=%d\tr_w=%d\tr_h=%d\n",
+    /*    printf("o=%x\to_x=%d\to_y=%d\to_o=%d\tr_o=%d\tr_w=%d\tr_h=%d\n",
                 (unsigned) params.orig,orig_x,orig_y,orig_offset,ref_offset,
                 ref_w,ref_h);
-
+*/
         
         // GET orig
         int i;
@@ -271,7 +290,7 @@ int main(ULL spe, ULL argp, ULL envp) {
         // GET ref
         for (i = 0; i < ref_h; ++i) {
             read_row(ref, params.ref, ref_w, ref_offset);
-            ref += REF_WIDTH;
+            ref += ref_w;
             params.ref += w + ref_offset;
             ref_offset = params.ref % 128;
             params.ref -= ref_offset;
@@ -280,17 +299,19 @@ int main(ULL spe, ULL argp, ULL envp) {
 
         ref = ref_array;
         orig = orig_array;
+        read_tmp = read_tmp_array;
 
         // calc
         ds_init();
         ds(orig_x, orig_y);
 
         // PUT sad_out
-        /*spu_mfcdma64(&sad_out, mfc_ea2h(params.sad_out), mfc_ea2l(params.sad_out),
+        spu_mfcdma64(&sad_out, mfc_ea2h(params.sad_out), mfc_ea2l(params.sad_out),
                 sizeof(sad_out_t), tag, MFC_PUT_CMD);
         spu_writech(MFC_WrTagMask, 1 << tag);
         spu_mfcstat(MFC_TAG_UPDATE_ALL);
-    */
+        
+        // inform PPE about finish
         spu_write_out_intr_mbox ((unsigned) SPE_FINISH);
     }
     return 0;
