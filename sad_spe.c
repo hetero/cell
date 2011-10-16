@@ -2,6 +2,7 @@
 #include <spu_mfcio.h>
 #include <spu_intrinsics.h>
 #include "spe.h"
+#include "spe_only.h"
 
 #define REF_WIDTH 39
 #define REF_HEIGHT 39
@@ -18,7 +19,6 @@
 }
 */
 
-int tag, read_size, sum, best_sad, sad_tmp, best_dir;
 uint32_t mbox_data[4] __attribute__((aligned(128)));
 
 uint8_t orig_array[ORIG_WIDTH * ORIG_HEIGHT] __attribute__((aligned(128)));
@@ -43,44 +43,16 @@ int ref_h __attribute__((aligned(128)));
 int sad_w __attribute__((aligned(128)));
 int sad_h __attribute__((aligned(128)));
 
-const int big_diamond_array[9 * 2] = {
-    0, 0,
-    2, 0,
-    1, 1,
-    0, 2,
-    -1, 1,
-    -2, 0,
-    -1, -1,
-    0, -2,
-    1, -1
-};
-
-const int small_diamond_array[5 * 2] = {
-    0, 0,
-    1, 0,
-    0, 1,
-    -1, 0,
-    0, -1
-};
-
-uint8_t mask_array[256] __attribute__((aligned(16)));
-
-__vector unsigned char *mask = (__vector unsigned char *) mask_array;
-
-__vector unsigned char merge_mask __attribute__((aligned(16)));
-
 const int *big_diamond = big_diamond_array;
 const int *small_diamond = small_diamond_array;
 
-__vector unsigned char reg __attribute__((aligned(16)));
-__vector unsigned char tmp __attribute__((aligned(16)));
-__vector unsigned char sd __attribute__((aligned(16)));
-
+VUC reg __attribute__((aligned(16)));
+VUC tmp __attribute__((aligned(16)));
+VUC sd __attribute__((aligned(16)));
 
 void read_row(uint8_t *dst, ULL src, int size, int offset) {
-    int i;
-    tag = 1;
-    read_size = size + offset;
+    int i, tag = 1;
+    int read_size = size + offset;
     read_size += (16 - (read_size%16)) % 16;
     spu_mfcdma64(read_tmp, mfc_ea2h(src), mfc_ea2l(src), 
             (read_size) * sizeof(uint8_t), tag, MFC_GET_CMD);
@@ -95,50 +67,23 @@ void get_ref(int x, int y) {
     int offset2 = (offset1 + ref_w) % 16;
     uint8_t *ref_ptr = &ref[y*ref_w + x - offset1];
 
-    //printf("x = %d, y = %d, ref_w = %d\n",x,y,ref_w);
-
     __vector unsigned char *ref_ptr1 = (__vector unsigned char *) ref_ptr;
     __vector unsigned char *ref_ptr2 = (__vector unsigned char *) (ref_ptr + 16);
 
     reg = spu_shuffle(*ref_ptr1, *ref_ptr2,  mask[offset1]);
 
-    /*uint8_t *reg_char = (uint8_t *) &reg;
-    printf("of1 = %d, of2 = %d\n", offset1, offset2);
-    printf("reg1 = ");
-    for (i = 0; i < 16; i++)
-        printf("%d ", reg_char[i]);
-    printf("\n");
-*/
     ref_ptr = &ref[(y+1)*ref_w + x - offset2];
     ref_ptr1 = (__vector unsigned char *) ref_ptr;
     ref_ptr2 = (__vector unsigned char *) (ref_ptr + 16);
 
     tmp = spu_shuffle(*ref_ptr1, *ref_ptr2, mask[offset2]);
 
-  /*  uint8_t *tmp_char = (uint8_t *) &tmp;
-    printf("tmp = ");
-    for (i = 0; i < 16; i++)
-        printf("%d ", tmp_char[i]);
-    printf("\n");
-*/
     reg = spu_shuffle(reg, tmp, merge_mask);
-  /*  printf("reg2 = ");
-    for (i = 0; i < 16; i++)
-        printf("%d ", reg_char[i]);
-    printf("\n");*/
 }
 
 int sad16(uint8_t *orig_reg_scalar) {
     __vector unsigned char orig_reg = 
         *((__vector unsigned char *) orig_reg_scalar);
-/*    ////
-    uint8_t *reg_char = (uint8_t *) &reg;
-    int i;
-    for (i = 0; i < 16; i++) 
-        printf("(%d,%d) ",orig_reg_scalar[i],reg_char[i]);
-    printf("\n");
-    ////
-*/
 
     sd = spu_absd(orig_reg, reg);
     uint8_t *s = (uint8_t *) &sd;
@@ -149,7 +94,7 @@ int sad16(uint8_t *orig_reg_scalar) {
 
 int calc_sad(int x, int y) {
     int i;
-    sum = 0;
+    int sum = 0;
     for (i = 0; i < 4; i++) {
         get_ref(x, y);
         sum += sad16(orig + 16*i);
@@ -174,33 +119,11 @@ void ds_init() {
         sad[i] = -1;
 }
 
-void mask_init() {
-    merge_mask = (__vector unsigned char) 
-        {0,1,2,3,4,5,6,7,16,17,18,19,20,21,22,23};
-
-    mask[0] = (__vector unsigned char) {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
-    mask[1] = (__vector unsigned char) {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
-    mask[2] = (__vector unsigned char) {2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17};
-    mask[3] = (__vector unsigned char) {3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18};
-    mask[4] = (__vector unsigned char) {4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
-    mask[5] = (__vector unsigned char) {5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20};
-    mask[6] = (__vector unsigned char) {6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21};
-    mask[7] = (__vector unsigned char) {7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22};
-    mask[8] = (__vector unsigned char) {8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23};
-    mask[9] = (__vector unsigned char) {9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24};
-    mask[10] = (__vector unsigned char) {10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25};
-    mask[11] = (__vector unsigned char) {11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26};
-    mask[12] = (__vector unsigned char) {12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27};
-    mask[13] = (__vector unsigned char) {13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28};
-    mask[14] = (__vector unsigned char) {14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29};
-    mask[15] = (__vector unsigned char) {15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30};
-}
-
 void small_ds(int x, int y) {
-//    printf("small_ds(%d,%d)\n",x,y);
     int i;
-    best_sad = INT_MAX;
-    best_dir = 0;
+    int best_sad = INT_MAX;
+    int best_dir = 0;
+    int sad_tmp;
     for (i = 0; i < 5; i++) {
         sad_tmp = get_sad(x, y, &small_diamond[2 * i]);
         if (sad_tmp < best_sad) {
@@ -215,13 +138,11 @@ void small_ds(int x, int y) {
 
 void ds(int x, int y) {
     int i;
-//    printf("ds(%d, %d)\n",x,y);
-    best_sad = INT_MAX;
-    best_dir = 0;
+    int best_sad = INT_MAX;
+    int best_dir = 0;
+    int sad_tmp;
     for (i = 0; i < 9; i++) {
         sad_tmp = get_sad(x, y, &big_diamond[2 * i]);
-    /*    printf("sad(%d,%d)=%d\n",x+big_diamond[2*i],
-                y+big_diamond[2*i+1],sad_tmp);*/
         if (sad_tmp < best_sad) {
             best_dir = i;
             best_sad = sad_tmp;
@@ -236,18 +157,15 @@ void ds(int x, int y) {
 }
 
 int main(ULL spe, ULL argp, ULL envp) {
-    mask_init();
-    tag = 1;
+    int tag = 1;
     while(1) {
         orig = orig_array;
         ref = ref_array;
         read_tmp = read_tmp_array;
-//        printf("Before reading...\n");
         mbox_data[0] = spu_read_in_mbox();
         mbox_data[1] = spu_read_in_mbox();
         mbox_data[2] = spu_read_in_mbox();
         mbox_data[3] = spu_read_in_mbox();
-  //      printf("4 messages read...\n");
 
         if (mbox_data[0] == SPE_END)
             break;
@@ -270,11 +188,6 @@ int main(ULL spe, ULL argp, ULL envp) {
         sad_w = ref_w - 7;
         sad_h = ref_h - 7;
 
-    /*    printf("o=%x\to_x=%d\to_y=%d\to_o=%d\tr_o=%d\tr_w=%d\tr_h=%d\n",
-                (unsigned) params.orig,orig_x,orig_y,orig_offset,ref_offset,
-                ref_w,ref_h);
-*/
-        
         // GET orig
         int i;
         for (i = 0; i < ORIG_HEIGHT; ++i) {
@@ -285,8 +198,6 @@ int main(ULL spe, ULL argp, ULL envp) {
             params.orig -= orig_offset;
         }
         
-        //printf("after get orig\n\n");
-
         // GET ref
         for (i = 0; i < ref_h; ++i) {
             read_row(ref, params.ref, ref_w, ref_offset);
@@ -295,8 +206,6 @@ int main(ULL spe, ULL argp, ULL envp) {
             ref_offset = params.ref % 128;
             params.ref -= ref_offset;
         }
-        //printf("after get orig\n\n");
-
         ref = ref_array;
         orig = orig_array;
         read_tmp = read_tmp_array;

@@ -13,8 +13,6 @@
 #include "c63.h"
 #include "ppe.h"
 
-#define NUM_SPE 1
-
 sad_out_t spe_out[NUM_SPE] __attribute__((aligned(128)));
 sad_params_t sad_params[NUM_SPE] __attribute__((aligned(128)));
 
@@ -66,9 +64,9 @@ void *run_sad_spe(void *thread_arg) {
 /* Motion estimation for 8x8 block */
 static void me_block_8x8(int spe_nr, struct c63_common *cm, int mb_x, int mb_y, uint8_t *orig, uint8_t *ref, int cc)
 {
-    /*printf("\norig = %x, mb_x = %d, mb_y = %d, cc = %d\n", (unsigned) orig, mb_x, mb_y, cc);
-    fflush(stdout);*/
-    
+    /*printf("\nspe_nr = %d, orig = %x, mb_x = %d, mb_y = %d, cc = %d\n", spe_nr, (unsigned) orig, mb_x, mb_y, cc);
+    fflush(stdout);
+    */
     if (thread_started[spe_nr])
         pthread_join(thread[spe_nr], NULL);
 
