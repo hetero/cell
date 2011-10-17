@@ -19,7 +19,53 @@
         spu_mfcdma64(ls, h, l, sz, tag, cmd); \
 }
 */
+volatile unsigned long long _count;
+volatile unsigned int _count_base;
+volatile _Bool _counting;
 
+#define DECR_MAX 0xFFFFFFFF
+#define DECR_COUNT DECR_MAX
+
+#define prof_clear() \
+{ \
+    if (_counting) { \
+        unsigned int end = spu_readch(SPU_RdDec); \
+        _count += (end > _count_base) ? (DECR_MAX + _count_base - end) : \
+            (_count_base - end); \
+    } \
+    _count = 0; \
+    _count_base = spu_readch(SPU_RdDec); \
+}
+
+#define prof_start() \
+{ \
+    if (_counting) { \
+        unsigned int end = spu_readch(SPU_RdDec); \
+        _count += (end > _count_base) ? (DECR_MAX + _count_base - end) : \
+            (_count_base - end); \
+    } \
+    spu_writech(SPU_WrDec, DECR_COUNT); \
+    spu_writech(SPU_WrEventMask, MFC_DECREMENTER_EVENT); \
+    _counting = 1; \
+    _count_base = spu_readch(SPU_RdDec); \
+}
+
+#define prof_stop() \
+{ \
+    if (_counting) { \
+        unsigned int end = spu_readch(SPU_RdDec); \
+        _count += (end > _count_base) ? (DECR_MAX + _count_base - end) : \
+            (_count_base - end); \
+    } \
+    _counting = 0; \
+    spu_writech(SPU_WrEventMask, 0); \
+    spu_writech(SPU_WrEventAck, MFC_DECREMENTER_EVENT); \
+    _count_base = spu_readch(SPU_RdDec); \
+}
+
+#define prof_write() printf("SPU#: %3.3f\n", (float) _count / 1e6)
+
+float total_time = 0;
 
 uint8_t orig_array[ORIG_WIDTH * ORIG_HEIGHT] __attribute__((aligned(128)));
 uint8_t ref_array[REF_WIDTH * REF_HEIGHT] __attribute__((aligned(128)));
@@ -33,7 +79,7 @@ VUC *ref;
 VUC *read_tmp;
 
 unsigned mbox_data[4];
-int w, wm128, orig_offset, ref_offset, orig_x, orig_y, ref_w, ref_h, sad_w, sad_h;
+int w, wm128, orig_x, orig_y, ref_w, ref_h, sad_w, sad_h;
 
 VUC reg;
 VUC tmp;
@@ -135,19 +181,74 @@ void ds(int x, int y) {
     }
 }
 
+void get_orig_input(ULL input_orig, int orig_offset) {
+    int i;
+    // (two rows in each loop step)
+    for (i = 0; i < ORIG_HEIGHT / 2; ++i) {
+        // read 8 bytes and everything on the left to 128 boundary
+        read_row(read_tmp, input_orig, 8, orig_offset);
+        // shift and copy to orig[i]
+        orig[i] = spu_shuffle(read_tmp[orig_offset / 16],
+                read_tmp[orig_offset / 16 + 1], mask[orig_offset % 16]);
+        // jump to next row in input
+        input_orig += w + orig_offset;
+        orig_offset = input_orig % 128;
+        input_orig -= orig_offset;
+
+        // read 8 bytes
+        read_row(read_tmp, input_orig, 8, orig_offset);
+        // shift
+        read_tmp[0] = spu_shuffle(read_tmp[orig_offset / 16],
+                read_tmp[orig_offset / 16 + 1], mask[orig_offset % 16]);
+        // merge
+        orig[i] = spu_shuffle(orig[i], read_tmp[0], merge_mask);
+        // jump to next row in input
+        input_orig += w + orig_offset;
+        orig_offset = input_orig % 128;
+        input_orig -= orig_offset;
+    }
+}
+
+void get_ref_input(ULL input_ref, int ref_offset) {
+    int i, j;
+    int vectors = ref_w / 16 + (ref_w % 16 > 0);
+    for (i = 0; i < ref_h; ++i) {
+        // read row of input (and shit on the left)
+        read_row(read_tmp, input_ref, ref_w, ref_offset);
+        // shift vector by vector
+        for (j = 0; j < vectors; ++j) {
+            ref[i * VEC_REF_WIDTH + j] = spu_shuffle(
+                    read_tmp[ref_offset / 16 + j],
+                    read_tmp[ref_offset / 16 + j + 1],
+                    mask[ref_offset % 16]);
+        }
+        // jump to next row in input
+        input_ref += w + ref_offset;
+        ref_offset = input_ref % 128;
+        input_ref -= ref_offset;
+    }
+}
+
 int main(ULL spe, ULL argp, ULL envp) {
+
+    prof_clear();
+
     sad_params_t params __attribute__((aligned(128)));
-    int tag = 1, i, j;
+    int tag = 1;
+    int orig_offset, ref_offset;
 
     while(1) {
         orig = (VUC *) orig_array;
         ref = (VUC *) ref_array;
         read_tmp = (VUC *) read_tmp_array;
 
+        prof_start();
+        // get task from mailbox
         mbox_data[0] = spu_read_in_mbox();
         mbox_data[1] = spu_read_in_mbox();
         mbox_data[2] = spu_read_in_mbox();
         mbox_data[3] = spu_read_in_mbox();
+        prof_stop();
 
         if (mbox_data[0] == SPE_END)
             break;
@@ -169,60 +270,12 @@ int main(ULL spe, ULL argp, ULL envp) {
         ref_h = params.ref_h;
         sad_w = ref_w - 7;
         sad_h = ref_h - 7;
-
-        // GET orig (two rows in each loop step)
-        for (i = 0; i < ORIG_HEIGHT / 2; ++i) {
-            // read 8 bytes and everything on the left to 128 boundary
-            read_row(read_tmp, params.orig, 8, orig_offset);
-            // shift and copy to orig[i]
-            orig[i] = spu_shuffle(read_tmp[orig_offset / 8],
-                    read_tmp[orig_offset / 8 + 1], mask[orig_offset % 8]);
-            // jump to next row in input
-            params.orig += w + orig_offset;
-            orig_offset = params.orig % 128;
-            params.orig -= orig_offset;
-
-            // read 8 bytes
-            read_row(read_tmp, params.orig, 8, orig_offset);
-            // shift
-            read_tmp[0] = spu_shuffle(read_tmp[orig_offset / 8],
-                    read_tmp[orig_offset / 8 + 1], mask[orig_offset % 8]);
-            // merge
-            orig[i] = spu_shuffle(orig[i], read_tmp[0], merge_mask);
-            // jump to next row in input
-            params.orig += w + orig_offset;
-            orig_offset = params.orig % 128;
-            params.orig -= orig_offset;
-        }
         
+        // GET orig
+        get_orig_input(params.orig, orig_offset);
+
         // GET ref
-        int vectors = ref_w / 16 + (ref_w % 16 > 0);
-        for (i = 0; i < ref_h; ++i) {
-            // read row of input (and shit on the left)
-            read_row(read_tmp, params.ref, ref_w, ref_offset);
-            // shift block by block
-            for (j = 0; j < vectors; ++j) {
-                // first block (8) in vector (16)
-                ref[i * VEC_REF_WIDTH + j] = spu_shuffle(
-                        read_tmp[ref_offset / 8 + j],
-                        read_tmp[ref_offset / 8 + j + 1],
-                        mask[ref_offset % 8]);
-                // second block (8) in vector (16)
-                read_tmp[0] = spu_shuffle(
-                        read_tmp[ref_offset / 8 + j + 1],
-                        read_tmp[ref_offset / 8 + j + 2],
-                        mask[ref_offset % 8]);
-                // merge
-                ref[i * VEC_REF_WIDTH + j] = spu_shuffle(
-                        ref[i * VEC_REF_WIDTH + j],
-                        read_tmp[0],
-                        merge_mask);
-            }
-            // jump to next row in input
-            params.ref += w + ref_offset;
-            ref_offset = params.ref % 128;
-            params.ref -= ref_offset;
-        }
+        get_ref_input(params.ref, ref_offset);
 
         // calc
         ds_init();
@@ -237,5 +290,7 @@ int main(ULL spe, ULL argp, ULL envp) {
         // inform PPE about finish
         spu_write_out_intr_mbox ((unsigned) SPE_FINISH);
     }
+
+    prof_write();
     return 0;
 }

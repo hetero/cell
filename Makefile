@@ -13,7 +13,7 @@ c63enc: c63enc.o dsp.o tables.o io.o c63_write.o c63.h common.o me.o sad_spe.elf
 c63dec: c63dec.o dsp.o tables.o io.o c63.h common.o me.o
 
 sad_spe.elf: sad_spe.c
-	$(SPU_CC) $(SPU_CFLAGS) $(SPU_LDFLAGS) $^ -o $@    
+	$(SPU_CC) $^ $(SPU_CFLAGS) $(SPU_LDFLAGS) -o $@   
 
 clean:
 	rm -f *.o *.elf c63enc c63dec
