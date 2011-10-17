@@ -19,7 +19,66 @@
         spu_mfcdma64(ls, h, l, sz, tag, cmd); \
 }
 */
+volatile unsigned long long _count;
+volatile unsigned int _count_base;
+volatile _Bool _counting;
 
+#define DECR_MAX 0xFFFFFFFF
+#define DECR_COUNT DECR_MAX
+
+/*
+#define prof_cp(cp_num) \
+{ \
+    if (_counting) { \
+        unsigned int end = spu_readch(SPU_RdDec); \
+        _count += (end > _count_base) ? (DECR_MAX + _count_base - end) : \
+            (_count_base - end); \
+    } \
+    printf("SPU#: CP"#cp_num", %llu\n", _count); \
+    _count_base = spu_readch(SPU_RdDec); \
+}
+*/
+
+#define prof_clear() \
+{ \
+    if (_counting) { \
+        unsigned int end = spu_readch(SPU_RdDec); \
+        _count += (end > _count_base) ? (DECR_MAX + _count_base - end) : \
+            (_count_base - end); \
+    } \
+    _count = 0; \
+    _count_base = spu_readch(SPU_RdDec); \
+}
+
+#define prof_start() \
+{ \
+    if (_counting) { \
+        unsigned int end = spu_readch(SPU_RdDec); \
+        _count += (end > _count_base) ? (DECR_MAX + _count_base - end) : \
+            (_count_base - end); \
+    } \
+    spu_writech(SPU_WrDec, DECR_COUNT); \
+    spu_writech(SPU_WrEventMask, MFC_DECREMENTER_EVENT); \
+    _counting = 1; \
+    _count_base = spu_readch(SPU_RdDec); \
+}
+
+#define prof_stop() \
+{ \
+    if (_counting) { \
+        unsigned int end = spu_readch(SPU_RdDec); \
+        _count += (end > _count_base) ? (DECR_MAX + _count_base - end) : \
+            (_count_base - end); \
+    } \
+    _counting = 0; \
+    spu_writech(SPU_WrEventMask, 0); \
+    spu_writech(SPU_WrEventAck, MFC_DECREMENTER_EVENT); \
+    _count_base = spu_readch(SPU_RdDec); \
+}
+
+#define prof_write() printf("SPU#: %3.3f\n", (float) _count / 1e6)
+
+float total_time = 0;
 
 uint8_t orig_array[ORIG_WIDTH * ORIG_HEIGHT] __attribute__((aligned(128)));
 uint8_t ref_array[REF_WIDTH * REF_HEIGHT] __attribute__((aligned(128)));
@@ -38,6 +97,22 @@ int w, wm128, orig_offset, ref_offset, orig_x, orig_y, ref_w, ref_h, sad_w, sad_
 VUC reg;
 VUC tmp;
 VUC sd;
+
+/*
+void start() {
+    clock_gettime(CLOCK_REALTIME, &start_timer);
+}
+
+void stop() {
+    clock_gettime(CLOCK_REALTIME, &stop_timer);
+    total_time += stop_timer.tv_sec - start_timer.tv_sec + 
+        (float) (stop_timer.tv_nsec - start_timer.tv_nsec) / 1e9;
+}
+
+void print_time() {
+    printf("SPE time: %2.3f\n", total_time);
+}
+*/
 
 void read_row(VUC *dst, ULL src, int size, int offset) {
     int tag = 1;
@@ -136,6 +211,8 @@ void ds(int x, int y) {
 }
 
 int main(ULL spe, ULL argp, ULL envp) {
+    prof_clear();
+
     sad_params_t params __attribute__((aligned(128)));
     int tag = 1, i, j;
 
@@ -144,10 +221,12 @@ int main(ULL spe, ULL argp, ULL envp) {
         ref = (VUC *) ref_array;
         read_tmp = (VUC *) read_tmp_array;
 
+        prof_start();
         mbox_data[0] = spu_read_in_mbox();
         mbox_data[1] = spu_read_in_mbox();
         mbox_data[2] = spu_read_in_mbox();
         mbox_data[3] = spu_read_in_mbox();
+        prof_stop();
 
         if (mbox_data[0] == SPE_END)
             break;
@@ -169,6 +248,7 @@ int main(ULL spe, ULL argp, ULL envp) {
         ref_h = params.ref_h;
         sad_w = ref_w - 7;
         sad_h = ref_h - 7;
+        
 
         // GET orig (two rows in each loop step)
         for (i = 0; i < ORIG_HEIGHT / 2; ++i) {
@@ -237,5 +317,7 @@ int main(ULL spe, ULL argp, ULL envp) {
         // inform PPE about finish
         spu_write_out_intr_mbox ((unsigned) SPE_FINISH);
     }
+
+    prof_write();
     return 0;
 }
