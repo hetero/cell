@@ -5,7 +5,7 @@
 #include "spe_only.h"
 
 #define REF_WIDTH 48
-#define VEC_REF_WIDTH REF_WIDTH / 16;
+#define VEC_REF_WIDTH REF_WIDTH / 16
 #define REF_HEIGHT 39
 #define ORIG_WIDTH 8
 #define ORIG_HEIGHT 8
@@ -39,41 +39,31 @@ VUC reg;
 VUC tmp;
 VUC sd;
 
-void read_row(uint8_t *dst, ULL src, int size, int offset) {
-    int i, tag = 1;
+void read_row(VUC *dst, ULL src, int size, int offset) {
+    int tag = 1;
     int read_size = size + offset;
     read_size += (16 - (read_size%16)) % 16;
     spu_mfcdma64(read_tmp, mfc_ea2h(src), mfc_ea2l(src), 
             (read_size) * sizeof(uint8_t), tag, MFC_GET_CMD);
     spu_writech(MFC_WrTagMask, 1 << tag);
     spu_mfcstat(MFC_TAG_UPDATE_ALL);
-    for (i = 0; i < size; ++i)
-        dst[i] = read_tmp[offset + i];
 }
 
+// stores into "reg" two rows of ref beginnig from x,y
+// assumption : REF_WIDTH % 16 = 0
 void get_ref(int x, int y) {
-    int offset1 = (y*REF_WIDTH + x) % 16;
-    int offset2 = (offset1 + REF_WIDTH) % 16;
-    uint8_t *ref_ptr = &ref[y*REF_WIDTH + x - offset1];
+    int offset = (y*REF_WIDTH + x) % 16;
+    int block = y*VEC_REF_WIDTH + x/16;
 
-    VUC *ref_ptr1 = (VUC *) ref_ptr;
-    VUC *ref_ptr2 = (VUC *) (ref_ptr + 16);
+    reg = spu_shuffle(ref[block], ref[block + 1],  mask[offset]);
 
-    reg = spu_shuffle(*ref_ptr1, *ref_ptr2,  mask[offset1]);
+    block += VEC_REF_WIDTH;
 
-    ref_ptr = &ref[(y+1)*REF_WIDTH + x - offset2];
-    ref_ptr1 = (VUC *) ref_ptr;
-    ref_ptr2 = (VUC *) (ref_ptr + 16);
-
-    tmp = spu_shuffle(*ref_ptr1, *ref_ptr2, mask[offset2]);
-
+    tmp = spu_shuffle(ref[block], ref[block + 1], mask[offset]);
     reg = spu_shuffle(reg, tmp, merge_mask);
 }
 
-int sad16(uint8_t *orig_reg_scalar) {
-    VUC orig_reg = 
-        *((VUC *) orig_reg_scalar);
-
+int sad16(VUC orig_reg) {
     sd = spu_absd(orig_reg, reg);
     uint8_t *s = (uint8_t *) &sd;
 
@@ -86,7 +76,7 @@ int calc_sad(int x, int y) {
     int sum = 0;
     for (i = 0; i < 4; i++) {
         get_ref(x, y);
-        sum += sad16(orig + 16*i);
+        sum += sad16(orig[i]);
         y += 2;
     }
     return sum; 
@@ -185,7 +175,7 @@ int main(ULL spe, ULL argp, ULL envp) {
             // read 8 bytes and everything on the left to 128 boundary
             read_row(read_tmp, params.orig, 8, orig_offset);
             // shift and copy to orig[i]
-            orig[i] = spe_shuffle(read_tmp[orig_offset / 8],
+            orig[i] = spu_shuffle(read_tmp[orig_offset / 8],
                     read_tmp[orig_offset / 8 + 1], mask[orig_offset % 8]);
             // jump to next row in input
             params.orig += w + orig_offset;
@@ -195,10 +185,10 @@ int main(ULL spe, ULL argp, ULL envp) {
             // read 8 bytes
             read_row(read_tmp, params.orig, 8, orig_offset);
             // shift
-            read_tmp[0] = spe_shuffle(read_tmp[orig_offset / 8],
+            read_tmp[0] = spu_shuffle(read_tmp[orig_offset / 8],
                     read_tmp[orig_offset / 8 + 1], mask[orig_offset % 8]);
             // merge
-            orig[i] = spe_shuffle(orig[i], read_tmp[0], merge_mask);
+            orig[i] = spu_shuffle(orig[i], read_tmp[0], merge_mask);
             // jump to next row in input
             params.orig += w + orig_offset;
             orig_offset = params.orig % 128;
@@ -213,19 +203,26 @@ int main(ULL spe, ULL argp, ULL envp) {
             // shift block by block
             for (j = 0; j < vectors; ++j) {
                 // first block (8) in vector (16)
-                ref[i * VEC_REF_WIDTH + j] = spe_shuffle(
+                ref[i * VEC_REF_WIDTH + j] = spu_shuffle(
                         read_tmp[ref_offset / 8 + j],
                         read_tmp[ref_offset / 8 + j + 1],
                         mask[ref_offset % 8]);
-                // shift
-
+                // second block (8) in vector (16)
+                read_tmp[0] = spu_shuffle(
+                        read_tmp[ref_offset / 8 + j + 1],
+                        read_tmp[ref_offset / 8 + j + 2],
+                        mask[ref_offset % 8]);
+                // merge
+                ref[i * VEC_REF_WIDTH + j] = spu_shuffle(
+                        ref[i * VEC_REF_WIDTH + j],
+                        read_tmp[0],
+                        merge_mask);
+            }
+            // jump to next row in input
             params.ref += w + ref_offset;
             ref_offset = params.ref % 128;
             params.ref -= ref_offset;
         }
-        ref = ref_array;
-        orig = orig_array;
-        read_tmp = read_tmp_array;
 
         // calc
         ds_init();
