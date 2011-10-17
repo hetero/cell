@@ -238,17 +238,16 @@ int main(ULL spe, ULL argp, ULL envp) {
     int orig_offset, ref_offset;
 
     while(1) {
+        prof_start();
         orig = (VUC *) orig_array;
         ref = (VUC *) ref_array;
         read_tmp = (VUC *) read_tmp_array;
 
-        prof_start();
         // get task from mailbox
         mbox_data[0] = spu_read_in_mbox();
         mbox_data[1] = spu_read_in_mbox();
         mbox_data[2] = spu_read_in_mbox();
         mbox_data[3] = spu_read_in_mbox();
-        prof_stop();
 
         if (mbox_data[0] == SPE_END)
             break;
@@ -289,6 +288,7 @@ int main(ULL spe, ULL argp, ULL envp) {
         
         // inform PPE about finish
         spu_write_out_intr_mbox ((unsigned) SPE_FINISH);
+        prof_stop();
     }
 
     prof_write();

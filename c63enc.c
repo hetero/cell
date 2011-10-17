@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
+#include <time.h>
 
 #include "c63.h"
 #include "tables.h"
@@ -36,6 +37,24 @@ extern char *optarg;
 spe_program_handle_t *prog;
 pthread_t run_thread[NUM_SPE];
 thread_arg_t run_arg[NUM_SPE];
+
+struct timespec start_time, stop_time;
+
+float total_time = 0;
+
+void start() {
+    clock_gettime(CLOCK_REALTIME, &start_time);
+}
+
+void stop() {
+    clock_gettime(CLOCK_REALTIME, &stop_time);
+    total_time += stop_time.tv_sec - start_time.tv_sec + 
+        (stop_time.tv_nsec - start_time.tv_nsec) / 1e9;
+}
+
+void print_time() {
+    printf("PPE time: %f\n", total_time);
+}
 
 /* Read YUV frames */
 static yuv_t* read_yuv(FILE *file)
@@ -192,7 +211,9 @@ static void c63_encode_image(struct c63_common *cm, yuv_t *image)
     /* dump_image can be used here to check if the prediction is correct. */
     //dump_image(cm->curframe->predicted, cm->width, cm->height, predfile);
 
+    start();
     write_frame(cm);
+    stop();
 
     ++cm->framenum;
     ++cm->frames_since_keyframe;
@@ -352,5 +373,6 @@ int main(int argc, char **argv)
 //    fclose(predfile);
     spe_dispose();
 
+    print_time();
     return EXIT_SUCCESS;
 }
