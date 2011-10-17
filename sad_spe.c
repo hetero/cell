@@ -26,19 +26,6 @@ volatile _Bool _counting;
 #define DECR_MAX 0xFFFFFFFF
 #define DECR_COUNT DECR_MAX
 
-/*
-#define prof_cp(cp_num) \
-{ \
-    if (_counting) { \
-        unsigned int end = spu_readch(SPU_RdDec); \
-        _count += (end > _count_base) ? (DECR_MAX + _count_base - end) : \
-            (_count_base - end); \
-    } \
-    printf("SPU#: CP"#cp_num", %llu\n", _count); \
-    _count_base = spu_readch(SPU_RdDec); \
-}
-*/
-
 #define prof_clear() \
 { \
     if (_counting) { \
@@ -92,27 +79,11 @@ VUC *ref;
 VUC *read_tmp;
 
 unsigned mbox_data[4];
-int w, wm128, orig_offset, ref_offset, orig_x, orig_y, ref_w, ref_h, sad_w, sad_h;
+int w, wm128, orig_x, orig_y, ref_w, ref_h, sad_w, sad_h;
 
 VUC reg;
 VUC tmp;
 VUC sd;
-
-/*
-void start() {
-    clock_gettime(CLOCK_REALTIME, &start_timer);
-}
-
-void stop() {
-    clock_gettime(CLOCK_REALTIME, &stop_timer);
-    total_time += stop_timer.tv_sec - start_timer.tv_sec + 
-        (float) (stop_timer.tv_nsec - start_timer.tv_nsec) / 1e9;
-}
-
-void print_time() {
-    printf("SPE time: %2.3f\n", total_time);
-}
-*/
 
 void read_row(VUC *dst, ULL src, int size, int offset) {
     int tag = 1;
@@ -210,18 +181,48 @@ void ds(int x, int y) {
     }
 }
 
+void get_orig_input(ULL input_orig, int orig_offset) {
+    int i;
+    // (two rows in each loop step)
+    for (i = 0; i < ORIG_HEIGHT / 2; ++i) {
+        // read 8 bytes and everything on the left to 128 boundary
+        read_row(read_tmp, input_orig, 8, orig_offset);
+        // shift and copy to orig[i]
+        orig[i] = spu_shuffle(read_tmp[orig_offset / 8],
+                read_tmp[orig_offset / 8 + 1], mask[orig_offset % 8]);
+        // jump to next row in input
+        input_orig += w + orig_offset;
+        orig_offset = input_orig % 128;
+        input_orig -= orig_offset;
+
+        // read 8 bytes
+        read_row(read_tmp, input_orig, 8, orig_offset);
+        // shift
+        read_tmp[0] = spu_shuffle(read_tmp[orig_offset / 8],
+                read_tmp[orig_offset / 8 + 1], mask[orig_offset % 8]);
+        // merge
+        orig[i] = spu_shuffle(orig[i], read_tmp[0], merge_mask);
+        // jump to next row in input
+        input_orig += w + orig_offset;
+        orig_offset = input_orig % 128;
+        input_orig -= orig_offset;
+    }
+}
+        
+
 int main(ULL spe, ULL argp, ULL envp) {
     prof_clear();
 
     sad_params_t params __attribute__((aligned(128)));
     int tag = 1, i, j;
+    int orig_offset, ref_offset;
 
     while(1) {
         orig = (VUC *) orig_array;
         ref = (VUC *) ref_array;
-        read_tmp = (VUC *) read_tmp_array;
 
         prof_start();
+        // get task from mailbox
         mbox_data[0] = spu_read_in_mbox();
         mbox_data[1] = spu_read_in_mbox();
         mbox_data[2] = spu_read_in_mbox();
@@ -249,32 +250,9 @@ int main(ULL spe, ULL argp, ULL envp) {
         sad_w = ref_w - 7;
         sad_h = ref_h - 7;
         
+        // GET orig
+        get_orig_input(params.orig, orig_offset);
 
-        // GET orig (two rows in each loop step)
-        for (i = 0; i < ORIG_HEIGHT / 2; ++i) {
-            // read 8 bytes and everything on the left to 128 boundary
-            read_row(read_tmp, params.orig, 8, orig_offset);
-            // shift and copy to orig[i]
-            orig[i] = spu_shuffle(read_tmp[orig_offset / 8],
-                    read_tmp[orig_offset / 8 + 1], mask[orig_offset % 8]);
-            // jump to next row in input
-            params.orig += w + orig_offset;
-            orig_offset = params.orig % 128;
-            params.orig -= orig_offset;
-
-            // read 8 bytes
-            read_row(read_tmp, params.orig, 8, orig_offset);
-            // shift
-            read_tmp[0] = spu_shuffle(read_tmp[orig_offset / 8],
-                    read_tmp[orig_offset / 8 + 1], mask[orig_offset % 8]);
-            // merge
-            orig[i] = spu_shuffle(orig[i], read_tmp[0], merge_mask);
-            // jump to next row in input
-            params.orig += w + orig_offset;
-            orig_offset = params.orig % 128;
-            params.orig -= orig_offset;
-        }
-        
         // GET ref
         int vectors = ref_w / 16 + (ref_w % 16 > 0);
         for (i = 0; i < ref_h; ++i) {
