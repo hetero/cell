@@ -208,18 +208,49 @@ void get_orig_input(ULL input_orig, int orig_offset) {
         input_orig -= orig_offset;
     }
 }
-        
+
+void get_ref_input(ULL input_ref, int ref_offset) {
+    int i, j;
+    int vectors = ref_w / 16 + (ref_w % 16 > 0);
+    for (i = 0; i < ref_h; ++i) {
+        // read row of input (and shit on the left)
+        read_row(read_tmp, input_ref, ref_w, ref_offset);
+        // shift block by block
+        for (j = 0; j < vectors; ++j) {
+            // first block (8) in vector (16)
+            ref[i * VEC_REF_WIDTH + j] = spu_shuffle(
+                    read_tmp[ref_offset / 8 + j],
+                    read_tmp[ref_offset / 8 + j + 1],
+                    mask[ref_offset % 8]);
+            // second block (8) in vector (16)
+            read_tmp[0] = spu_shuffle(
+                    read_tmp[ref_offset / 8 + j + 1],
+                    read_tmp[ref_offset / 8 + j + 2],
+                    mask[ref_offset % 8]);
+            // merge
+            ref[i * VEC_REF_WIDTH + j] = spu_shuffle(
+                    ref[i * VEC_REF_WIDTH + j],
+                    read_tmp[0],
+                    merge_mask);
+        }
+        // jump to next row in input
+        input_ref += w + ref_offset;
+        ref_offset = input_ref % 128;
+        input_ref -= ref_offset;
+    }
+}
 
 int main(ULL spe, ULL argp, ULL envp) {
     prof_clear();
 
     sad_params_t params __attribute__((aligned(128)));
-    int tag = 1, i, j;
+    int tag = 1;
     int orig_offset, ref_offset;
 
     while(1) {
         orig = (VUC *) orig_array;
         ref = (VUC *) ref_array;
+        read_tmp = (VUC *) read_tmp_array;
 
         prof_start();
         // get task from mailbox
@@ -254,33 +285,7 @@ int main(ULL spe, ULL argp, ULL envp) {
         get_orig_input(params.orig, orig_offset);
 
         // GET ref
-        int vectors = ref_w / 16 + (ref_w % 16 > 0);
-        for (i = 0; i < ref_h; ++i) {
-            // read row of input (and shit on the left)
-            read_row(read_tmp, params.ref, ref_w, ref_offset);
-            // shift block by block
-            for (j = 0; j < vectors; ++j) {
-                // first block (8) in vector (16)
-                ref[i * VEC_REF_WIDTH + j] = spu_shuffle(
-                        read_tmp[ref_offset / 8 + j],
-                        read_tmp[ref_offset / 8 + j + 1],
-                        mask[ref_offset % 8]);
-                // second block (8) in vector (16)
-                read_tmp[0] = spu_shuffle(
-                        read_tmp[ref_offset / 8 + j + 1],
-                        read_tmp[ref_offset / 8 + j + 2],
-                        mask[ref_offset % 8]);
-                // merge
-                ref[i * VEC_REF_WIDTH + j] = spu_shuffle(
-                        ref[i * VEC_REF_WIDTH + j],
-                        read_tmp[0],
-                        merge_mask);
-            }
-            // jump to next row in input
-            params.ref += w + ref_offset;
-            ref_offset = params.ref % 128;
-            params.ref -= ref_offset;
-        }
+        get_ref_input(params.ref, ref_offset);
 
         // calc
         ds_init();
