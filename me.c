@@ -13,14 +13,23 @@
 #include "c63.h"
 #include "ppe.h"
 
+int SPE_NUMBERS[NUM_SPE] = {0,1,2,3,4,5};
+
+int global_mb_x, global_mb_y, global_mb_rows, global_mb_cols, global_cc;
+uint8_t *global_orig; 
+uint8_t *global_ref;
+
+struct c63_common *global_cm;
+
+pthread_mutex_t mutex;
+
 sad_out_t spe_out[NUM_SPE] __attribute__((aligned(128)));
 sad_params_t sad_params[NUM_SPE] __attribute__((aligned(128)));
 
-pthread_t thread[NUM_SPE];
+pthread_t smart_thread[NUM_SPE];
 thread_arg_t th_arg[NUM_SPE];
-int thread_started[NUM_SPE] = {0};
 
-void *run_sad_spe(void *thread_arg) {
+void run_sad_spe(void *thread_arg) {
     thread_arg_t *arg = (thread_arg_t *) thread_arg;
     unsigned mbox_data[4];
     ULL params = (unsigned long) (arg->params);
@@ -56,22 +65,15 @@ void *run_sad_spe(void *thread_arg) {
     {
         mb->use_mv = 0;
     }
-
-    return NULL;
 }
     
 
 /* Motion estimation for 8x8 block */
 static void me_block_8x8(int spe_nr, struct c63_common *cm, int mb_x, int mb_y, uint8_t *orig, uint8_t *ref, int cc)
 {
-    /*printf("\nspe_nr = %d, orig = %x, mb_x = %d, mb_y = %d, cc = %d\n", spe_nr, (unsigned) orig, mb_x, mb_y, cc);
-    fflush(stdout);
-    */
-    if (thread_started[spe_nr])
-        pthread_join(thread[spe_nr], NULL);
-
-    thread_started[spe_nr] = 1;
-
+    /*printf("spe_nr = %d, orig = %x, mb_x = %d, mb_y = %d, cc = %d\n", spe_nr, (unsigned) orig, mb_x, mb_y, cc);
+    fflush(stdout);*/
+    
     struct macroblock *mb = &cm->curframe->mbs[cc][mb_y * cm->padw[cc]/8 + mb_x];
 
     int range = cm->me_search_range;
@@ -122,46 +124,115 @@ static void me_block_8x8(int spe_nr, struct c63_common *cm, int mb_x, int mb_y, 
     th_arg[spe_nr].spe = spe[spe_nr];
     th_arg[spe_nr].params = &sad_params[spe_nr];
     
-    int ret = pthread_create(&thread[spe_nr], NULL, run_sad_spe, &th_arg[spe_nr]);
-    if (ret) {
-        perror("pthread_create");
-        exit(1);
+    run_sad_spe(&th_arg[spe_nr]);
+}
+
+void *run_smart_thread(void *void_spe_nr) {
+    int spe_nr = *(int *) void_spe_nr;
+    while (1) {
+        if (pthread_mutex_lock(&mutex) != 0)
+            perror("lock failed");
+        int mb_x = global_mb_x;
+        int mb_y = global_mb_y;
+        int cc = global_cc;
+        uint8_t *orig = global_orig;
+        uint8_t *ref = global_ref;
+        struct c63_common *cm = global_cm;
+
+        if (mb_x < global_mb_cols && mb_y < global_mb_rows) {
+            global_mb_x++;
+            if (global_mb_x >= global_mb_cols) {
+                global_mb_x = 0;
+                global_mb_y++;
+            }
+            if (pthread_mutex_unlock(&mutex) != 0)
+                perror("unlock failed");
+        
+            me_block_8x8(spe_nr, cm, mb_x, mb_y, orig, ref, cc);
+        }
+        else {
+            if (pthread_mutex_unlock(&mutex) != 0)
+                perror("unlock failed");
+            break;
+        }
     }
+
+    return NULL;
 }
 
 void c63_motion_estimate(struct c63_common *cm)
 {
+    if (pthread_mutex_init(&mutex, 0) != 0)
+        perror("Mutex init failed.");
     /* Compare this frame with previous reconstructed frame */
 
-    int mb_x, mb_y, spe_nr = 0;
+    int spe_nr;
 
     /* Luma */
-    for (mb_y=0; mb_y < cm->mb_rows; ++mb_y)
-    {
-        for (mb_x=0; mb_x < cm->mb_cols; ++mb_x)
-        {
-            me_block_8x8(spe_nr, cm, mb_x, mb_y, cm->curframe->orig->Y, cm->refframe->recons->Y, 0);
-            spe_nr = (spe_nr + 1) % NUM_SPE;
+    global_mb_x = 0;
+    global_mb_y = 0;
+    global_mb_rows = cm->mb_rows;
+    global_mb_cols = cm->mb_cols;
+    global_orig = cm->curframe->orig->Y;
+    global_ref = cm->refframe->recons->Y;
+    global_cc = 0;
+    global_cm = cm;
+
+    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) {
+        int ret = pthread_create(&smart_thread[spe_nr], NULL, run_smart_thread, 
+               &SPE_NUMBERS[spe_nr]); 
+        if (ret) {
+            perror("pthread_create");
+            exit(1);
         }
     }
 
+    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++)
+        pthread_join(smart_thread[spe_nr], NULL);
+
     /* Chroma */
-    for (mb_y=0; mb_y < cm->mb_rows/2; ++mb_y)
-    {
-        for (mb_x=0; mb_x < cm->mb_cols/2; ++mb_x)
-        {
-            me_block_8x8(spe_nr, cm, mb_x, mb_y, cm->curframe->orig->U, cm->refframe->recons->U, 1);
-            spe_nr = (spe_nr + 1) % NUM_SPE;
+
+    global_mb_x = 0;
+    global_mb_y = 0;
+    global_mb_rows /= 2;
+    global_mb_cols /= 2;
+    global_orig = cm->curframe->orig->U;
+    global_ref = cm->refframe->recons->U;
+    global_cc = 1;
+
+    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) {
+        int ret = pthread_create(&smart_thread[spe_nr], NULL, run_smart_thread, 
+               &SPE_NUMBERS[spe_nr]); 
+        if (ret) {
+            perror("pthread_create");
+            exit(1);
         }
     }
-    for (mb_y=0; mb_y < cm->mb_rows/2; ++mb_y)
-    {
-        for (mb_x=0; mb_x < cm->mb_cols/2; ++mb_x)
-        {
-            me_block_8x8(spe_nr, cm, mb_x, mb_y, cm->curframe->orig->V, cm->refframe->recons->V, 2);
-            spe_nr = (spe_nr + 1) % NUM_SPE;
+
+    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++)
+        pthread_join(smart_thread[spe_nr], NULL);
+
+    global_mb_x = 0;
+    global_mb_y = 0;
+    global_orig = cm->curframe->orig->V;
+    global_ref = cm->refframe->recons->V;
+    global_cc = 2;
+
+    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) {
+        int ret = pthread_create(&smart_thread[spe_nr], NULL, run_smart_thread, 
+               &SPE_NUMBERS[spe_nr]); 
+        if (ret) {
+            perror("pthread_create");
+            exit(1);
         }
     }
+
+    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) 
+        pthread_join(smart_thread[spe_nr], NULL);
+
+
+    if (pthread_mutex_destroy (&mutex) != 0)
+        perror("mutex destroy failed");
 }
 
 /* Motion compensation for 8x8 block */
