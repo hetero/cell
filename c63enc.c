@@ -351,6 +351,5 @@ int main(int argc, char **argv)
     fclose(infile);
 //    fclose(predfile);
     spe_dispose();
-
     return EXIT_SUCCESS;
 }
