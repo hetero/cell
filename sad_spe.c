@@ -241,6 +241,7 @@ void get_ref_input(ULL input_ref, int ref_offset) {
 }
 
 int main(ULL spe, ULL argp, ULL envp) {
+
     prof_clear();
 
     sad_params_t params __attribute__((aligned(128)));

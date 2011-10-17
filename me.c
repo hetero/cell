@@ -37,6 +37,9 @@ void run_sad_spe(void *thread_arg) {
     mbox_data[2] = (unsigned) (params >> 32);
     mbox_data[3] = (unsigned) (params);
     
+    sad_out_t *sad_out = (sad_out_t *) (unsigned long) (arg->params->sad_out);
+    struct macroblock *mb = (struct macroblock *) (unsigned long) (arg->params->mb);
+
     // send params to SPE
     spe_in_mbox_write (arg->spe, mbox_data, 4, SPE_MBOX_ALL_BLOCKING);
     
@@ -48,9 +51,6 @@ void run_sad_spe(void *thread_arg) {
         exit(EXIT_FAILURE);
     }
     
-    sad_out_t *sad_out = (sad_out_t *) (unsigned long) (arg->params->sad_out);
-    struct macroblock *mb = (struct macroblock *) (unsigned long) (arg->params->mb);
-
     mb->mv_x = sad_out->x - arg->params->orig_x;
     mb->mv_y = sad_out->y - arg->params->orig_y;
     int best_sad = sad_out->sad;
