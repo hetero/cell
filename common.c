@@ -9,6 +9,7 @@
 
 #include "c63.h"
 #include "tables.h"
+#include "spe.h"
 
 void dequantize_idct_row(int16_t *in_data, uint8_t *prediction, int w, int h, int y,
 			 uint8_t *out_data, uint8_t *quantization)
@@ -74,15 +75,37 @@ void dct_quantize(uint8_t *in_data, uint8_t *prediction,
         uint32_t width, uint32_t height,
         int16_t *out_data, uint8_t *quantization)
 {
-    /*
+   /* 
     int y;
     for (y=0; y<height; y+=8)
     {
         dct_quantize_row(in_data+y*width, prediction+y*width, width, height, out_data+y*width, quantization);
     }
     */
+    
     lock();
+    mode = DCT_MODE;
+    g_dct_row = 0;
+    g_dct_col = 0;
+    g_dct_width = width;
+    g_dct_height = height;
+    g_dct_in_data = in_data;
+    g_dct_prediction = prediction;
+    g_dct_quantization = quantization;
+    g_dct_out_data = out_data;
     unlock();
+
+    int i;
+    int spe_nr = rand() % NUM_SPE;
+    for (i = 0; i < NUM_SPE; i++) {
+        int ret = pthread_create(&smart_thread[spe_nr], NULL, run_smart_thread, 
+               &SPE_NUMBERS[spe_nr]); 
+        if (ret) {
+            perror("pthread_create");
+            exit(1);
+        }
+        spe_nr = (spe_nr + 1) % NUM_SPE;
+    }
 }
 
 void destroy_frame(struct frame *f)

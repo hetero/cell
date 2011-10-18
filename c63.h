@@ -3,9 +3,10 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <inttypes.h>
 #include <pthread.h>
-#include "spe.h"
+#include "ppe.h"
 
 #define MAX_FILELENGTH 200
 #define DEFAULT_OUTPUT_FILE "a.mjpg"
@@ -31,15 +32,27 @@
 #define OFF_MODE 3
 #define DCT_MODE 4
 
+extern spe_context_ptr_t spe[8];
 extern int mode;
 extern pthread_mutex_t mutex;
 
-extern int g_dct_x, g_dct_y, g_dct_width, g_dct_height;
+extern pthread_t smart_thread[NUM_SPE];
+
+extern int SPE_NUMBERS[6];
+
+extern int global_mb_x, global_mb_y, global_mb_rows, global_mb_cols, global_cc;
+extern uint8_t *global_orig; 
+extern uint8_t *global_ref;
+extern struct c63_common *global_cm;
+
+
+extern int g_dct_col, g_dct_row, g_dct_width, g_dct_height;
 extern uint8_t *g_dct_in_data, *g_dct_prediction, *g_dct_quantization;
 extern int16_t *g_dct_out_data;
 
 void lock();
 void unlock();
+void *run_smart_thread(void *void_spe_nr);
 
 struct yuv
 {

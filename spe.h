@@ -6,6 +6,8 @@
 #define SPE_FINISH 2
 #define SPE_SAD 3
 
+typedef unsigned long long ULL;
+
 typedef struct {
             int sad, x, y, pad;
 } sad_out_t;
@@ -25,6 +27,12 @@ typedef struct {
     int ref_h;
 } sad_params_t;
 
-typedef unsigned long long ULL;
+typedef struct {
+    ULL in_data;
+    ULL prediction;
+    ULL out_data;
+    ULL quantization;
+} dct_params_t;
+
 
 #endif
