@@ -13,7 +13,13 @@
 #include "c63.h"
 #include "ppe.h"
 
-int SPE_NUMBERS[NUM_SPE] = {0,1,2,3,4,5};
+#define WAIT_MODE 1
+#define SAD_MODE 2
+#define OFF_MODE 3
+
+int mode = WAIT_MODE;
+
+int SPE_NUMBERS[6] = {0,1,2,3,4,5};
 
 int global_mb_x, global_mb_y, global_mb_rows, global_mb_cols, global_cc;
 uint8_t *global_orig; 
@@ -28,6 +34,16 @@ sad_params_t sad_params[NUM_SPE] __attribute__((aligned(128)));
 
 pthread_t smart_thread[NUM_SPE];
 thread_arg_t th_arg[NUM_SPE];
+
+void lock() {
+    if (pthread_mutex_lock(&mutex) != 0)
+        perror("lock failed");
+}
+
+void unlock() {
+    if (pthread_mutex_unlock(&mutex) != 0)
+        perror("unlock failed");
+}
 
 void run_sad_spe(void *thread_arg) {
     thread_arg_t *arg = (thread_arg_t *) thread_arg;
@@ -130,8 +146,15 @@ static void me_block_8x8(int spe_nr, struct c63_common *cm, int mb_x, int mb_y, 
 void *run_smart_thread(void *void_spe_nr) {
     int spe_nr = *(int *) void_spe_nr;
     while (1) {
-        if (pthread_mutex_lock(&mutex) != 0)
-            perror("lock failed");
+        lock();
+        while (mode == WAIT_MODE) {
+            unlock();
+            lock();
+        }
+        if (mode == OFF_MODE) {
+            unlock();
+            break;
+        }
         int mb_x = global_mb_x;
         int mb_y = global_mb_y;
         int cc = global_cc;
@@ -145,15 +168,37 @@ void *run_smart_thread(void *void_spe_nr) {
                 global_mb_x = 0;
                 global_mb_y++;
             }
-            if (pthread_mutex_unlock(&mutex) != 0)
-                perror("unlock failed");
+            unlock();
         
             me_block_8x8(spe_nr, cm, mb_x, mb_y, orig, ref, cc);
         }
         else {
-            if (pthread_mutex_unlock(&mutex) != 0)
-                perror("unlock failed");
-            break;
+            global_mb_x = 0;
+            global_mb_y = 0;
+
+            if (global_cc == 0) {
+                orig = cm->curframe->orig->U;
+                ref = cm->refframe->recons->U;
+                global_mb_cols /= 2;
+                global_mb_rows /= 2;
+            }
+            else if (global_cc == 1) {
+                orig = cm->curframe->orig->V;
+                ref = cm->refframe->recons->V;
+            }
+            else { // global_cc == 2
+                orig = cm->curframe->orig->Y;
+                ref = cm->refframe->recons->Y;
+                global_mb_cols *= 2;
+                global_mb_rows *= 2;
+                mode = OFF_MODE;
+            }
+            global_cc = (global_cc + 1) % 3;
+            
+            unlock();
+            //TODO: 
+            if (cc == 2) 
+                break;
         }
     }
 
@@ -162,13 +207,22 @@ void *run_smart_thread(void *void_spe_nr) {
 
 void c63_motion_estimate(struct c63_common *cm)
 {
+    /* Compare this frame with previous reconstructed frame */
+    int spe_nr;
     if (pthread_mutex_init(&mutex, 0) != 0)
         perror("Mutex init failed.");
-    /* Compare this frame with previous reconstructed frame */
+    lock();
+    mode = WAIT_MODE; // TODO
 
-    int spe_nr;
+    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) {
+        int ret = pthread_create(&smart_thread[spe_nr], NULL, run_smart_thread, 
+               &SPE_NUMBERS[spe_nr]); 
+        if (ret) {
+            perror("pthread_create");
+            exit(1);
+        }
+    }
 
-    /* Luma */
     global_mb_x = 0;
     global_mb_y = 0;
     global_mb_rows = cm->mb_rows;
@@ -178,59 +232,13 @@ void c63_motion_estimate(struct c63_common *cm)
     global_cc = 0;
     global_cm = cm;
 
-    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) {
-        int ret = pthread_create(&smart_thread[spe_nr], NULL, run_smart_thread, 
-               &SPE_NUMBERS[spe_nr]); 
-        if (ret) {
-            perror("pthread_create");
-            exit(1);
-        }
-    }
+    mode = SAD_MODE;
 
-    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++)
-        pthread_join(smart_thread[spe_nr], NULL);
-
-    /* Chroma */
-
-    global_mb_x = 0;
-    global_mb_y = 0;
-    global_mb_rows /= 2;
-    global_mb_cols /= 2;
-    global_orig = cm->curframe->orig->U;
-    global_ref = cm->refframe->recons->U;
-    global_cc = 1;
-
-    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) {
-        int ret = pthread_create(&smart_thread[spe_nr], NULL, run_smart_thread, 
-               &SPE_NUMBERS[spe_nr]); 
-        if (ret) {
-            perror("pthread_create");
-            exit(1);
-        }
-    }
-
-    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++)
-        pthread_join(smart_thread[spe_nr], NULL);
-
-    global_mb_x = 0;
-    global_mb_y = 0;
-    global_orig = cm->curframe->orig->V;
-    global_ref = cm->refframe->recons->V;
-    global_cc = 2;
-
-    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) {
-        int ret = pthread_create(&smart_thread[spe_nr], NULL, run_smart_thread, 
-               &SPE_NUMBERS[spe_nr]); 
-        if (ret) {
-            perror("pthread_create");
-            exit(1);
-        }
-    }
+    unlock();
 
     for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) 
         pthread_join(smart_thread[spe_nr], NULL);
-
-
+    
     if (pthread_mutex_destroy (&mutex) != 0)
         perror("mutex destroy failed");
 }
