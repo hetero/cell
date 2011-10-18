@@ -98,7 +98,7 @@ static void dequantize_block(float *in_data, float *out_data, uint8_t *quant_tbl
     }
 }
 
-void dct_quant_block_8x8(int16_t *in_data, int16_t *out_data, uint8_t *quant_tbl)
+void dct_quant_block_8x8(int *in_data, int16_t *out_data, uint8_t *quant_tbl)
 {
     float mb[8*8] __attribute((aligned(16)));
     float mb2[8*8] __attribute((aligned(16)));
