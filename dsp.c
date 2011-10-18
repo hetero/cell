@@ -163,35 +163,3 @@ void dequant_idct_block_8x8(int16_t *in_data, int16_t *out_data, uint8_t *quant_
         out_data[i] = mb[i];
 }
 
-void sad_block_8x8(uint8_t *block1, uint8_t *block2, int stride, int *result)
-{
-    *result = 0;
-
-    int u,v;
-    for (v=0; v<8; ++v)
-        for (u=0; u<8; ++u)
-            *result += abs(block2[v*stride+u] - block1[v*stride+u]);
-}
-
-void sad_4rows(uint8_t *orig, uint8_t *ref, sad_out_t *sad_out, int w)
-{
-    int x, y;
-    int best_rows_sad = INT_MAX;
-    int rows_sad, best_rows_x = 0, best_rows_y = 0;
-    for (y = 0; y < 4; y++)
-    {
-        for (x = 0; x < 32; x++)
-        {
-            sad_block_8x8(orig, ref + y*w + x, w, &rows_sad);
-            if (rows_sad < best_rows_sad)
-            {
-                best_rows_x = x;
-                best_rows_y = y;
-                best_rows_sad = rows_sad;
-            }
-        }
-    }
-    sad_out->sad = best_rows_sad;
-    sad_out->x = best_rows_x;
-    sad_out->y = best_rows_y;
-}

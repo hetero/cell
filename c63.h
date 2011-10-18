@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include <pthread.h>
 #include "spe.h"
 
 #define MAX_FILELENGTH 200
@@ -109,7 +110,6 @@ uint16_t get_bits(struct entropy_ctx *c, uint8_t n);
 
 void dct_quant_block_8x8(int16_t *in_data, int16_t *out_data, uint8_t *quant_tbl);
 void dequant_idct_block_8x8(int16_t *in_data, int16_t *out_data, uint8_t *quant_tbl);
-void sad_block_8x8(uint8_t *block1, uint8_t *block2, int stride, int *result);
 
 void write_frame(struct c63_common *cm);
 void dequantize_idct(int16_t *in_data, uint8_t *prediction, uint32_t width, uint32_t height,
@@ -124,7 +124,5 @@ void c63_motion_estimate(struct c63_common *cm);
 void c63_motion_compensate(struct c63_common *cm);
 
 void dump_image(yuv_t *image, int w, int h, FILE *fp);
-
-void sad_4rows(uint8_t *orig, uint8_t *ref, sad_out_t *sad_out, int w);
 
 #endif /* mjpeg_encoder.h */
