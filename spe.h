@@ -5,6 +5,7 @@
 #define SPE_END 1
 #define SPE_FINISH 2
 #define SPE_SAD 3
+#define SPE_DCT 4
 
 typedef unsigned long long ULL;
 

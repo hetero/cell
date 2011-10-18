@@ -73,10 +73,17 @@ static void run_sad_spe(void *thread_arg) {
     }
 }
 
-static void run_dct_spe(int spe_nr, dct_params_t *params)
+static void run_dct_spe(int spe_nr, dct_params_t *dct_params)
 {
-    // wyslanie zadania na mailboxa
-    // potem dorobienie obslugi dct w spe
+    unsigned mbox_data[4];
+    ULL params = (unsigned long) dct_params;
+    mbox_data[0] = SPE_DCT;
+    mbox_data[1] = 0;
+    mbox_data[2] = (unsigned)(params >> 32);
+    mbox_data[3] = (unsigned)params;
+
+    spe_in_mbox_write(spe[spe_nr], mbox_data, 4, SPE_MBOX_ALL_BLOCKING);
+    spe_out_intr_mbox_read(spe[spe_nr], mbox_data, 1, SPE_MBOX_ALL_BLOCKING);
 }
     
 /* Motion estimation for 8x8 block */
