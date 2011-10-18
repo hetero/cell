@@ -271,7 +271,7 @@ void dct_quantize_row(uint8_t *in_data, uint8_t *prediction, int w, int h,
         printf("\n");
 #endif
 
-        dct_quant_block_8x8((int *)block, out_data+(x*8), quantization);
+        dct_quant_block_8x8(block, out_data+(x*8), quantization);
     }
 }
 /*
