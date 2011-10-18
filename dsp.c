@@ -85,11 +85,11 @@ static void vec_scale_block(VF *in_data, VF *out_data)
     out_data[1] = vec_madd(in_data[1], first_row, vec_zero);
     
     int i;
-    for (i = 2; i < 8; i += 2)
+    for (i = 2; i < 16; i += 2)
     {
         out_data[i] = vec_madd(in_data[i], first_column, vec_zero);
     }
-    for (i = 3; i < 8; i += 2)
+    for (i = 3; i < 16; i += 2)
     {
         out_data[i] = in_data[i];
     }
@@ -126,6 +126,11 @@ static void quantize_block(float *in_data, float *out_data, uint8_t *quant_tbl)
         /* Zig-zag and quantize */
         out_data[zigzag] = round((dct / 4.0) / quant_tbl[zigzag]);
     }
+}
+
+static void vec_quantize_block(VF *in_data, VF *out_data, uint8_t *quant_tbl)
+{
+    quantize_block((float *)in_data, (float *)out_data, quant_tbl);
 }
 
 static void dequantize_block(float *in_data, float *out_data, uint8_t *quant_tbl)
@@ -167,7 +172,8 @@ void dct_quant_block_8x8(VSI *in_data, int16_t *out_data, uint8_t *quant_tbl)
 
     vec_transpose_block(mb, mb2);
     vec_scale_block(mb2, mb);
-    quantize_block((float *)mb, (float *)mb2, quant_tbl);
+    //scale_block((float *)mb2, (float *)mb);
+    vec_quantize_block(mb, mb2, quant_tbl);
 
     for (i=0; i<64; ++i)
         out_data[i] = ((float *)mb2)[i];
