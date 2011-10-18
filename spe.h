@@ -15,7 +15,7 @@ typedef struct {
     unsigned long long sad_out;
     unsigned long long mb;
     int w;
-    int wm128;
+    int spe_nr;
     int orig_offset;
     int ref_offset;
     int orig_x;

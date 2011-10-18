@@ -135,7 +135,7 @@ static void me_block_8x8(int spe_nr, struct c63_common *cm, int mb_x, int mb_y, 
     sad_params[spe_nr].sad_out = (unsigned long) &spe_out[spe_nr];
     sad_params[spe_nr].mb = (unsigned long) mb;
     sad_params[spe_nr].w = w;
-    sad_params[spe_nr].wm128 = w % 128;
+    sad_params[spe_nr].spe_nr = spe_nr;
 
     th_arg[spe_nr].spe = spe[spe_nr];
     th_arg[spe_nr].params = &sad_params[spe_nr];
@@ -208,19 +208,21 @@ void *run_smart_thread(void *void_spe_nr) {
 void c63_motion_estimate(struct c63_common *cm)
 {
     /* Compare this frame with previous reconstructed frame */
-    int spe_nr;
+    int spe_nr, i;
     if (pthread_mutex_init(&mutex, 0) != 0)
         perror("Mutex init failed.");
     lock();
     mode = WAIT_MODE; // TODO
-
-    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) {
+    
+    spe_nr = rand() % NUM_SPE;
+    for (i = 0; i < NUM_SPE; i++) {
         int ret = pthread_create(&smart_thread[spe_nr], NULL, run_smart_thread, 
                &SPE_NUMBERS[spe_nr]); 
         if (ret) {
             perror("pthread_create");
             exit(1);
         }
+        spe_nr = (spe_nr + 1) % NUM_SPE;
     }
 
     global_mb_x = 0;

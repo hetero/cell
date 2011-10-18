@@ -63,7 +63,7 @@ volatile _Bool _counting;
     _count_base = spu_readch(SPU_RdDec); \
 }
 
-#define prof_write() printf("SPU#: %3.3f\n", (float) _count / 1e6)
+#define prof_write() printf("SPU %d: %3.3f\n", spe_nr, (float) _count / 1e6)
 
 float total_time = 0;
 
@@ -79,7 +79,7 @@ VUC *ref;
 VUC *read_tmp;
 
 unsigned mbox_data[4];
-int w, wm128, orig_x, orig_y, ref_w, ref_h, sad_w, sad_h;
+int w, spe_nr, orig_x, orig_y, ref_w, ref_h, sad_w, sad_h;
 
 VUC reg;
 VUC tmp;
@@ -261,7 +261,7 @@ int main(ULL spe, ULL argp, ULL envp) {
         
         // GET ints
         w = params.w;
-        wm128 = params.wm128;
+        spe_nr = params.spe_nr;
         orig_offset = params.orig_offset;
         ref_offset = params.ref_offset;
         orig_x = params.orig_x;
