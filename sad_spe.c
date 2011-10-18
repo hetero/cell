@@ -73,6 +73,7 @@ uint8_t read_tmp_array[256] __attribute__((aligned(128)));
 int sad[SAD_WIDTH * SAD_HEIGHT] __attribute__((aligned(128)));
 int ref_rows[REF_HEIGHT];
 int vectors;
+ULL input_ref;
 
 sad_out_t sad_out __attribute__((aligned(128)));
 
@@ -81,7 +82,7 @@ VUC *ref;
 VUC *read_tmp;
 
 unsigned mbox_data[4];
-int w, spe_nr, orig_x, orig_y, ref_w, ref_h, sad_w, sad_h;
+int w, spe_nr, orig_x, orig_y, ref_w, ref_h, sad_w, sad_h, ref_offset;
 
 VUC reg;
 VUC tmp;
@@ -97,9 +98,32 @@ void read_row(VUC *dst, ULL src, int size, int offset) {
     spu_mfcstat(MFC_TAG_UPDATE_ALL);
 }
 
+// read row of input
+void read_ref_row(ULL input, int ref_offset, int row_nr) {
+    int j;
+    input += row_nr * w + ref_offset;
+    ref_offset = input % 128;
+    input -= ref_offset;
+
+    read_row(read_tmp, input, ref_w, ref_offset);
+    // shift vector by vector
+    for (j = 0; j < vectors; ++j) {
+        ref[row_nr * VEC_REF_WIDTH + j] = spu_shuffle(
+                read_tmp[ref_offset / 16 + j],
+                read_tmp[ref_offset / 16 + j + 1],
+                mask[ref_offset % 16]);
+    }
+
+    ref_rows[row_nr] = 1;
+}
+
 // stores into "reg" two rows of ref beginnig from x,y
 // assumption : REF_WIDTH % 16 = 0
 void get_ref(int x, int y) {
+    if (!ref_rows[y])
+        read_ref_row(input_ref, ref_offset, y);
+    if (!ref_rows[y+1])
+        read_ref_row(input_ref, ref_offset, y+1);
     int offset = (y*REF_WIDTH + x) % 16;
     int block = y*VEC_REF_WIDTH + x/16;
 
@@ -214,39 +238,13 @@ void get_orig_input(ULL input_orig, int orig_offset) {
     }
 }
 
-// read row of input
-void get_ref_row(ULL input_ref, int ref_offset, int row_nr) {
-    int j;
-    input_ref += row_nr * w + ref_offset;
-    ref_offset = input_ref % 128;
-    input_ref -= ref_offset;
-
-    read_row(read_tmp, input_ref, ref_w, ref_offset);
-    // shift vector by vector
-    for (j = 0; j < vectors; ++j) {
-        ref[row_nr * VEC_REF_WIDTH + j] = spu_shuffle(
-                read_tmp[ref_offset / 16 + j],
-                read_tmp[ref_offset / 16 + j + 1],
-                mask[ref_offset % 16]);
-    }
-
-    ref_rows[row_nr] = 1;
-}
-
-void get_ref_input(ULL input_ref, int ref_offset) {
-    int i;
-    for (i = 0; i < ref_h; ++i) {
-        get_ref_row(input_ref, ref_offset, i);
-    }
-}
-
 int main(ULL spe, ULL argp, ULL envp) {
 
     prof_clear();
 
     sad_params_t params __attribute__((aligned(128)));
     int tag = 1;
-    int orig_offset, ref_offset;
+    int orig_offset;
 
     while(1) {
         orig = (VUC *) orig_array;
@@ -280,14 +278,12 @@ int main(ULL spe, ULL argp, ULL envp) {
         ref_h = params.ref_h;
         sad_w = ref_w - 7;
         sad_h = ref_h - 7;
+        input_ref = params.ref;
         
         ds_init();
         
         // GET orig
         get_orig_input(params.orig, orig_offset);
-
-        // GET ref
-        get_ref_input(params.ref, ref_offset);
 
         // calc
         ds(orig_x, orig_y);
