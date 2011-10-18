@@ -71,6 +71,8 @@ uint8_t orig_array[ORIG_WIDTH * ORIG_HEIGHT] __attribute__((aligned(128)));
 uint8_t ref_array[REF_WIDTH * REF_HEIGHT] __attribute__((aligned(128)));
 uint8_t read_tmp_array[256] __attribute__((aligned(128)));
 int sad[SAD_WIDTH * SAD_HEIGHT] __attribute__((aligned(128)));
+int ref_rows[REF_HEIGHT];
+int vectors;
 
 sad_out_t sad_out __attribute__((aligned(128)));
 
@@ -142,6 +144,9 @@ void ds_init() {
     int i;
     for (i = 0; i < sad_w * sad_h; ++i)
         sad[i] = -1;
+    for (i = 0; i < ref_h; ++i)
+        ref_rows[i] = 0;
+    vectors = ref_w / 16 + (ref_w % 16 > 0);
 }
 
 void small_ds(int x, int y) {
@@ -209,23 +214,29 @@ void get_orig_input(ULL input_orig, int orig_offset) {
     }
 }
 
+// read row of input
+void get_ref_row(ULL input_ref, int ref_offset, int row_nr) {
+    int j;
+    input_ref += row_nr * w + ref_offset;
+    ref_offset = input_ref % 128;
+    input_ref -= ref_offset;
+
+    read_row(read_tmp, input_ref, ref_w, ref_offset);
+    // shift vector by vector
+    for (j = 0; j < vectors; ++j) {
+        ref[row_nr * VEC_REF_WIDTH + j] = spu_shuffle(
+                read_tmp[ref_offset / 16 + j],
+                read_tmp[ref_offset / 16 + j + 1],
+                mask[ref_offset % 16]);
+    }
+
+    ref_rows[row_nr] = 1;
+}
+
 void get_ref_input(ULL input_ref, int ref_offset) {
-    int i, j;
-    int vectors = ref_w / 16 + (ref_w % 16 > 0);
+    int i;
     for (i = 0; i < ref_h; ++i) {
-        // read row of input (and shit on the left)
-        read_row(read_tmp, input_ref, ref_w, ref_offset);
-        // shift vector by vector
-        for (j = 0; j < vectors; ++j) {
-            ref[i * VEC_REF_WIDTH + j] = spu_shuffle(
-                    read_tmp[ref_offset / 16 + j],
-                    read_tmp[ref_offset / 16 + j + 1],
-                    mask[ref_offset % 16]);
-        }
-        // jump to next row in input
-        input_ref += w + ref_offset;
-        ref_offset = input_ref % 128;
-        input_ref -= ref_offset;
+        get_ref_row(input_ref, ref_offset, i);
     }
 }
 
@@ -242,17 +253,16 @@ int main(ULL spe, ULL argp, ULL envp) {
         ref = (VUC *) ref_array;
         read_tmp = (VUC *) read_tmp_array;
 
-        prof_start();
         // get task from mailbox
         mbox_data[0] = spu_read_in_mbox();
         mbox_data[1] = spu_read_in_mbox();
         mbox_data[2] = spu_read_in_mbox();
         mbox_data[3] = spu_read_in_mbox();
-        prof_stop();
 
         if (mbox_data[0] == SPE_END)
             break;
 
+        prof_start();
         // GET params
         spu_mfcdma64(&params, mbox_data[2], mbox_data[3], sizeof(sad_params_t),
                 tag, MFC_GET_CMD);
@@ -271,6 +281,8 @@ int main(ULL spe, ULL argp, ULL envp) {
         sad_w = ref_w - 7;
         sad_h = ref_h - 7;
         
+        ds_init();
+        
         // GET orig
         get_orig_input(params.orig, orig_offset);
 
@@ -278,7 +290,6 @@ int main(ULL spe, ULL argp, ULL envp) {
         get_ref_input(params.ref, ref_offset);
 
         // calc
-        ds_init();
         ds(orig_x, orig_y);
 
         // PUT sad_out
@@ -289,6 +300,7 @@ int main(ULL spe, ULL argp, ULL envp) {
         
         // inform PPE about finish
         spu_write_out_intr_mbox ((unsigned) SPE_FINISH);
+        prof_stop();
     }
 
     prof_write();
