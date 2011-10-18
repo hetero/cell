@@ -177,18 +177,18 @@ void *run_smart_thread(void *void_spe_nr) {
             global_mb_y = 0;
 
             if (global_cc == 0) {
-                orig = cm->curframe->orig->U;
-                ref = cm->refframe->recons->U;
+                global_orig = cm->curframe->orig->U;
+                global_ref = cm->refframe->recons->U;
                 global_mb_cols /= 2;
                 global_mb_rows /= 2;
             }
             else if (global_cc == 1) {
-                orig = cm->curframe->orig->V;
-                ref = cm->refframe->recons->V;
+                global_orig = cm->curframe->orig->V;
+                global_ref = cm->refframe->recons->V;
             }
             else { // global_cc == 2
-                orig = cm->curframe->orig->Y;
-                ref = cm->refframe->recons->Y;
+                global_orig = cm->curframe->orig->Y;
+                global_ref = cm->refframe->recons->Y;
                 global_mb_cols *= 2;
                 global_mb_rows *= 2;
                 mode = OFF_MODE;
