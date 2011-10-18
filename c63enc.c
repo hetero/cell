@@ -316,6 +316,8 @@ int main(int argc, char **argv)
 //    predfile = fopen("/tmp/pred.yuv", "wb");
 
     spe_init();
+    if (pthread_mutex_init(&mutex, 0) != 0)
+        perror("Mutex init failed.");
 
     struct c63_common *cm = init_c63_enc(width, height);
     cm->e_ctx.fp = outfile;
@@ -371,6 +373,8 @@ int main(int argc, char **argv)
     fclose(outfile);
     fclose(infile);
 //    fclose(predfile);
+    if (pthread_mutex_destroy (&mutex) != 0)
+        perror("mutex destroy failed");
     spe_dispose();
 
     print_time();
