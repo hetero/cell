@@ -4,6 +4,7 @@
 #define NUM_SPE 6
 #define SPE_END 1
 #define SPE_FINISH 2
+#define SPE_SAD 3
 
 typedef struct {
             int sad, x, y, pad;

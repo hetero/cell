@@ -13,12 +13,6 @@
 #include "c63.h"
 #include "ppe.h"
 
-#define WAIT_MODE 1
-#define SAD_MODE 2
-#define OFF_MODE 3
-
-int mode = WAIT_MODE;
-
 int SPE_NUMBERS[6] = {0,1,2,3,4,5};
 
 int global_mb_x, global_mb_y, global_mb_rows, global_mb_cols, global_cc;
@@ -27,29 +21,18 @@ uint8_t *global_ref;
 
 struct c63_common *global_cm;
 
-pthread_mutex_t mutex;
-
 sad_out_t spe_out[NUM_SPE] __attribute__((aligned(128)));
 sad_params_t sad_params[NUM_SPE] __attribute__((aligned(128)));
 
 pthread_t smart_thread[NUM_SPE];
 thread_arg_t th_arg[NUM_SPE];
 
-void lock() {
-    if (pthread_mutex_lock(&mutex) != 0)
-        perror("lock failed");
-}
-
-void unlock() {
-    if (pthread_mutex_unlock(&mutex) != 0)
-        perror("unlock failed");
-}
-
 void run_sad_spe(void *thread_arg) {
     thread_arg_t *arg = (thread_arg_t *) thread_arg;
     unsigned mbox_data[4];
     ULL params = (unsigned long) (arg->params);
-    mbox_data[0] = mbox_data[1] = 0;
+    mbox_data[0] = SPE_SAD;
+    mbox_data[1] = 0;
     mbox_data[2] = (unsigned) (params >> 32);
     mbox_data[3] = (unsigned) (params);
     
@@ -155,50 +138,59 @@ void *run_smart_thread(void *void_spe_nr) {
             unlock();
             break;
         }
-        int mb_x = global_mb_x;
-        int mb_y = global_mb_y;
-        int cc = global_cc;
-        uint8_t *orig = global_orig;
-        uint8_t *ref = global_ref;
-        struct c63_common *cm = global_cm;
+        else if (mode == SAD_MODE)
+        {
+            // coords of block
+            int mb_x = global_mb_x;
+            int mb_y = global_mb_y;
+            // Y/U/V
+            int cc = global_cc;
+            uint8_t *orig = global_orig;
+            uint8_t *ref = global_ref;
+            struct c63_common *cm = global_cm;
 
-        if (mb_x < global_mb_cols && mb_y < global_mb_rows) {
-            global_mb_x++;
-            if (global_mb_x >= global_mb_cols) {
-                global_mb_x = 0;
-                global_mb_y++;
-            }
-            unlock();
-        
-            me_block_8x8(spe_nr, cm, mb_x, mb_y, orig, ref, cc);
-        }
-        else {
-            global_mb_x = 0;
-            global_mb_y = 0;
-
-            if (global_cc == 0) {
-                global_orig = cm->curframe->orig->U;
-                global_ref = cm->refframe->recons->U;
-                global_mb_cols /= 2;
-                global_mb_rows /= 2;
-            }
-            else if (global_cc == 1) {
-                global_orig = cm->curframe->orig->V;
-                global_ref = cm->refframe->recons->V;
-            }
-            else { // global_cc == 2
-                global_orig = cm->curframe->orig->Y;
-                global_ref = cm->refframe->recons->Y;
-                global_mb_cols *= 2;
-                global_mb_rows *= 2;
-                mode = OFF_MODE;
-            }
-            global_cc = (global_cc + 1) % 3;
+            if (mb_x < global_mb_cols && mb_y < global_mb_rows) {
+                global_mb_x++;
+                if (global_mb_x >= global_mb_cols) {
+                    global_mb_x = 0;
+                    global_mb_y++;
+                }
+                unlock();
             
+                me_block_8x8(spe_nr, cm, mb_x, mb_y, orig, ref, cc);
+            }
+            else {
+                global_mb_x = 0;
+                global_mb_y = 0;
+
+                if (global_cc == 0) {
+                    global_orig = cm->curframe->orig->U;
+                    global_ref = cm->refframe->recons->U;
+                    global_mb_cols /= 2;
+                    global_mb_rows /= 2;
+                }
+                else if (global_cc == 1) {
+                    global_orig = cm->curframe->orig->V;
+                    global_ref = cm->refframe->recons->V;
+                }
+                else { // global_cc == 2
+                    global_orig = cm->curframe->orig->Y;
+                    global_ref = cm->refframe->recons->Y;
+                    global_mb_cols *= 2;
+                    global_mb_rows *= 2;
+                    mode = OFF_MODE;
+                }
+                global_cc = (global_cc + 1) % 3;
+                
+                unlock();
+                //TODO: 
+                if (cc == 2) 
+                    break;
+            }
+        }
+        else if (mode == DCT_MODE)
+        {
             unlock();
-            //TODO: 
-            if (cc == 2) 
-                break;
         }
     }
 
@@ -209,8 +201,6 @@ void c63_motion_estimate(struct c63_common *cm)
 {
     /* Compare this frame with previous reconstructed frame */
     int spe_nr;
-    if (pthread_mutex_init(&mutex, 0) != 0)
-        perror("Mutex init failed.");
     lock();
     mode = WAIT_MODE; // TODO
 
@@ -238,9 +228,6 @@ void c63_motion_estimate(struct c63_common *cm)
 
     for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) 
         pthread_join(smart_thread[spe_nr], NULL);
-    
-    if (pthread_mutex_destroy (&mutex) != 0)
-        perror("mutex destroy failed");
 }
 
 /* Motion compensation for 8x8 block */

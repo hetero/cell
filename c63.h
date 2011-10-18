@@ -26,6 +26,21 @@
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
+#define WAIT_MODE 1
+#define SAD_MODE 2
+#define OFF_MODE 3
+#define DCT_MODE 4
+
+extern int mode;
+extern pthread_mutex_t mutex;
+
+extern int g_dct_x, g_dct_y, g_dct_width, g_dct_height;
+extern uint8_t *g_dct_in_data, *g_dct_prediction, *g_dct_quantization;
+extern int16_t *g_dct_out_data;
+
+void lock();
+void unlock();
+
 struct yuv
 {
   uint8_t *Y;
