@@ -110,7 +110,6 @@ void *run_spe(void *thread_arg) {
 
     entry = SPE_DEFAULT_ENTRY;
     printf("Running SPE...\n");
-    printf("%d\n", arg->qp);
     ret = spe_context_run(arg->spe, &entry, 0, NULL, (void *) (unsigned long) arg->qp, &stop_info);
     if (ret < 0) {
         perror("spe_context_run");
@@ -141,10 +140,7 @@ void spe_init(uint8_t qp) {
             exit(1);
         }
         run_arg[i].spe = spe[i];
-        if (i == 0)
-            run_arg[i].qp = qp;
-        else
-            run_arg[i].qp = 0;
+        run_arg[i].qp = qp;
         ret = pthread_create(&run_thread[i], NULL, run_spe, &run_arg[i]);
         if (ret) {
             perror("run_pthread_create");
@@ -275,6 +271,12 @@ static void print_help()
 int main(int argc, char **argv)
 {
     int c;
+
+    for (c = 0; c < 6; ++c)
+    {
+       SPE_NUMBERS[c] = c; 
+    }
+
     yuv_t *image;
 
     if(argc == 1)

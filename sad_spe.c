@@ -319,9 +319,9 @@ void dct_quant_block_8x8(ULL out_data, uint8_t *quant_tbl)
 {
     VF mb[8*2];
     VF mb2[8*2];
-    VSS out_block[8];
-    int16_t *act_out;
-    float *act_mb;
+    //VSS out_block[8];
+    //int16_t *act_out;
+    //float *act_mb;
 
     int i, v, tag = 1;
 
@@ -344,16 +344,17 @@ void dct_quant_block_8x8(ULL out_data, uint8_t *quant_tbl)
     vec_scale_block(mb2, mb);
     vec_quantize_block(mb, mb2, quant_tbl);
 
+    /*
     act_mb = (float *)mb2;
     act_out = (int16_t *)out_block;
     for (i = 0; i < 64; ++i)
     {
         act_out[i] = (int16_t)act_mb[i];
     }
-
+    */
     // send output
-    spu_mfcdma64(out_block, mfc_ea2h(out_data), mfc_ea2l(out_data),
-            8 * sizeof(VSS), tag, MFC_PUT_CMD);
+    spu_mfcdma64(mb2, mfc_ea2h(out_data), mfc_ea2l(out_data),
+            8 * 2 * sizeof(VF), tag, MFC_PUT_CMD);
     spu_writech(MFC_WrTagMask, 1 << tag);
     spu_mfcstat(MFC_TAG_UPDATE_ALL);
 }
@@ -368,7 +369,7 @@ void dct_get_block(dct_params_t *params)
     int offset;
     for (i = 0; i < 8; ++i)
     {
-        src = (ULL) (UL) params->in_data;
+        src = (ULL) (UL) (params->in_data + i * params->width);
         offset = src % 128;
         src -= offset;
         read_row(read_tmp, src, 8, offset);
@@ -379,7 +380,7 @@ void dct_get_block(dct_params_t *params)
         act_block = (VUC *)&block[i * 2 + 1];
         *act_block = spu_shuffle(read_tmp[offset / 16],
                         read_tmp[offset / 16 + 1], mask_dct2[offset % 16]);
-        src = (ULL) (UL) params->prediction;
+        src = (ULL) (UL) (params->prediction + i * params->width);
         offset = src % 128;
         src -= offset;
         read_row(read_tmp, src, 8, offset);
@@ -394,20 +395,33 @@ void dct_get_block(dct_params_t *params)
     }
 }
 
+void print_spe(int *data)
+{
+    int i, j;
+    printf("First block before DCT on SPE:\n");
+    for (i = 0; i < 8; i++)
+    {
+        for (j = 0; j < 8; j++)
+        {
+            printf("%d ", data[i * 8 + j]);
+        }
+        printf("\n");
+    }
+    fflush(stdout);
+}
+
+
 int main(ULL spe, ULL argp, ULL envp) {
 
     prof_clear();
 
     // HACK
     int qp = (int)envp;
-    if (qp > 0)
+    int i;
+    for (i = 0; i < 64; ++i)
     {
-        int i;
-        for (i = 0; i < 64; ++i)
-        {
-            yquanttbl_def[i] = yquanttbl_def[i] / (qp / 10.0);
-            uvquanttbl_def[i] = uvquanttbl_def[i] / (qp / 10.0);
-        }
+        yquanttbl_def[i] = yquanttbl_def[i] / (qp / 10.0);
+        uvquanttbl_def[i] = uvquanttbl_def[i] / (qp / 10.0);
     }
     // ****
 
@@ -478,6 +492,12 @@ int main(ULL spe, ULL argp, ULL envp) {
             spu_mfcstat(MFC_TAG_UPDATE_ALL);
 
             dct_get_block(&dct_params);
+            //static int first = 1;
+            //if (first)
+            //{
+            //    print_spe((int *)block);
+            //    first = 0;
+            //}
 
             if (dct_params.quantization == 0)
             {

@@ -34,6 +34,7 @@ typedef struct {
     ULL prediction;
     ULL out_data;
     int quantization;
-    int pad[1];
+    int width;
 } dct_params_t;
+
 #endif

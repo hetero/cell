@@ -13,7 +13,7 @@ static float dct_out[NUM_SPE][8*8] __attribute__((aligned(128)));
 
 static dct_params_t dct_params[NUM_SPE] __attribute__((aligned(128)));
 
-int SPE_NUMBERS[6] = {0,1,2,3,4,5};
+int SPE_NUMBERS[6];
 
 // SAD globals
 int global_mb_x, global_mb_y, global_mb_rows, global_mb_cols, global_cc;
@@ -146,6 +146,22 @@ static void me_block_8x8(int spe_nr, struct c63_common *cm, int mb_x, int mb_y, 
     run_sad_spe(&th_arg[spe_nr]);
 }
 
+
+void print_block(signed short *data)
+{
+    int i, j;
+    printf("First block after DCT:\n");
+    for (i = 0; i < 8; i++)
+    {
+        for (j = 0; j < 8; j++)
+        {
+            printf("%d ", data[i * 8 + j]);
+        }
+        printf("\n");
+    }
+}
+
+
 static void dct_block_8x8(int spe_nr, int width, int height, int row, int col, uint8_t *in_data, uint8_t *prediction, int16_t *out_data, int quantization) 
 {
     int r, c;
@@ -156,12 +172,20 @@ static void dct_block_8x8(int spe_nr, int width, int height, int row, int col, u
     ptr = prediction + row * width + col;
     dct_params[spe_nr].prediction = (unsigned long) ptr;
 
-    int16_t *ptr_16 = out_data + row * width + col * 8;
-    dct_params[spe_nr].out_data = (unsigned long) ptr_16;
+    // aligned memory for sure
+    //int16_t *ptr_16 = out_data + row * width + col * 8;
+    dct_params[spe_nr].out_data = (unsigned long) dct_out[spe_nr];
 
     dct_params[spe_nr].quantization = quantization;
 
+    dct_params[spe_nr].width = width;
+
     run_dct_spe(spe_nr, &dct_params[spe_nr]);
+//    if (row == 0 && col == 0)
+//        print_block(out_data);
+    int16_t *ptr_16 = out_data + row * width + col * 8;
+    for (r = 0; r < 64; ++r)
+        ptr_16[r] = (int16_t)(dct_out[spe_nr][r]);
 }
 
 void *run_smart_thread(void *void_spe_nr) {

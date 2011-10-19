@@ -50,19 +50,20 @@ void dequantize_idct(int16_t *in_data, uint8_t *prediction, uint32_t width, uint
     }
 }
 
-void print_block(int16_t *data, int width)
+void print_common(int16_t *data)
 {
     int i, j;
-    printf("First block after DCT:\n");
+    printf("First block before DCT:\n");
     for (i = 0; i < 8; i++)
     {
         for (j = 0; j < 8; j++)
         {
-            printf("%d ", data[i * width + j]);
+            printf("%d ", data[i * 8 + j]);
         }
         printf("\n");
     }
 }
+
 
 void dct_quantize_row(uint8_t *in_data, uint8_t *prediction, int w, int h,
         int16_t *out_data, uint8_t *quantization)
@@ -83,14 +84,14 @@ void dct_quantize_row(uint8_t *in_data, uint8_t *prediction, int w, int h,
          * This allows us to ignore stride in DCT/iDCT and other functions. */
         dct_quant_block_8x8(block, out_data+(x*8), quantization);
         // DEBUG
-        /*
-        static bool first = true;
+        static int first = 1;
         if (first)
         {
-            print_block(out_data, width);
-            first = false;
+//            print_block_ble(out_data);
+            print_common(block);
+            first = 0;
         }
-        */
+        
         // DEBUG
     }
 }
@@ -99,14 +100,14 @@ void dct_quantize(uint8_t *in_data, uint8_t *prediction,
         uint32_t width, uint32_t height,
         int16_t *out_data, uint8_t *quant_tbl, int quantization)
 {
-
+/*
     int y;
     for (y=0; y<height; y+=8)
     {
         dct_quantize_row(in_data+y*width, prediction+y*width, width, height, out_data+y*width, quant_tbl);
     }
+  */
     
-    /*
     lock();
     mode = DCT_MODE;
     g_dct_row = 0;
@@ -132,7 +133,7 @@ void dct_quantize(uint8_t *in_data, uint8_t *prediction,
 
     for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) 
         pthread_join(smart_thread[spe_nr], NULL);
-        */
+        
 }
 
 void destroy_frame(struct frame *f)
