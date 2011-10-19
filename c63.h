@@ -3,9 +3,10 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <inttypes.h>
 #include <pthread.h>
-#include "spe.h"
+#include "ppe.h"
 
 #define MAX_FILELENGTH 200
 #define DEFAULT_OUTPUT_FILE "a.mjpg"
@@ -25,6 +26,33 @@
 
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
+#define WAIT_MODE 1
+#define SAD_MODE 2
+#define OFF_MODE 3
+#define DCT_MODE 4
+
+extern spe_context_ptr_t spe[8];
+extern int mode;
+extern pthread_mutex_t mutex;
+
+extern pthread_t smart_thread[NUM_SPE];
+
+extern int SPE_NUMBERS[6];
+
+extern int global_mb_x, global_mb_y, global_mb_rows, global_mb_cols, global_cc;
+extern uint8_t *global_orig; 
+extern uint8_t *global_ref;
+extern struct c63_common *global_cm;
+
+
+extern int g_dct_col, g_dct_row, g_dct_width, g_dct_height, g_dct_quantization;
+extern uint8_t *g_dct_in_data, *g_dct_prediction;
+extern int16_t *g_dct_out_data;
+
+void lock();
+void unlock();
+void *run_smart_thread(void *void_spe_nr);
 
 struct yuv
 {
@@ -116,7 +144,7 @@ void dequantize_idct(int16_t *in_data, uint8_t *prediction, uint32_t width, uint
 			 uint8_t *out_data, uint8_t *quantization);
 void dct_quantize(uint8_t *in_data, uint8_t *prediction,
         uint32_t width, uint32_t height,
-        int16_t *out_data, uint8_t *quantization);
+        int16_t *out_data, uint8_t *quant_tbl, int quantization);
 
 void destroy_frame(struct frame *f);
 struct frame* create_frame(struct c63_common *cm, yuv_t *image);

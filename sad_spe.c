@@ -11,7 +11,6 @@
 #define ORIG_HEIGHT 8
 #define SAD_WIDTH 32
 #define SAD_HEIGHT 32
-
 /*
 #define spu_mfcdma64(ls, h, l, sz, tag, cmd) { \
         printf("spu_mfcdma64(%p, %x, %x, %lu, %d, %d) -- Line: %d\n", ls, h, l, sz, tag, cmd, __LINE__); \
@@ -87,6 +86,12 @@ int w, spe_nr, orig_x, orig_y, ref_w, ref_h, sad_w, sad_h, ref_offset;
 VUC reg;
 VUC tmp;
 VUC sd;
+
+#define ISQRT2 0.70710678118654f
+VSI block[2 * 8];
+VF vec_zero = (VF) {0, 0, 0, 0};
+VF first_row = (VF) {ISQRT2, ISQRT2, ISQRT2, ISQRT2};
+VF first_column = (VF) {ISQRT2, 1.f, 1.f, 1.f};    
 
 void read_row(VUC *dst, ULL src, int size, int offset) {
     int tag = 1;
@@ -238,11 +243,177 @@ void get_orig_input(ULL input_orig, int orig_offset) {
     }
 }
 
+void transpose_block(float *in_data, float *out_data)
+{
+    int i,j;
+    for (i=0; i<8; ++i)
+        for (j=0; j<8; ++j)
+        {
+            out_data[i*8+j] = in_data[j*8+i];
+        }
+}
+
+void vec_transpose_block(VF *in_data, VF *out_data)
+{
+    transpose_block((float *)in_data, (float *)out_data);
+}
+
+void vec_dct_1d(VF *in_data, VF *out_data)
+{
+    int j;
+    float *f_tmp;
+    float *f_out = (float *)out_data;
+
+    VF tmp[2];
+
+    for (j=0; j<8; ++j)
+    {
+        tmp[0] = spu_madd(in_data[0], vec_dctlookup[j][0], vec_zero);
+        tmp[1] = spu_madd(in_data[1], vec_dctlookup[j][1], tmp[0]);
+        f_tmp = (float *)(&tmp[1]);
+        f_out[j] = f_tmp[0] + f_tmp[1] + f_tmp[2] + f_tmp[3];
+    }
+}
+
+static void vec_scale_block(VF *in_data, VF *out_data)
+{
+    out_data[0] = spu_madd(in_data[0], first_row, vec_zero);
+    out_data[0] = spu_madd(out_data[0], first_column, vec_zero);
+    out_data[1] = spu_madd(in_data[1], first_row, vec_zero);
+    
+    int i;
+    for (i = 2; i < 16; i += 2)
+    {
+        out_data[i] = spu_madd(in_data[i], first_column, vec_zero);
+    }
+    for (i = 3; i < 16; i += 2)
+    {
+        out_data[i] = in_data[i];
+    }
+}
+
+void quantize_block(float *in_data, float *out_data, uint8_t *quant_tbl)
+{
+    int zigzag;
+    float ret;
+    for (zigzag=0; zigzag < 64; ++zigzag)
+    {
+        uint8_t u = zigzag_U[zigzag];
+        uint8_t v = zigzag_V[zigzag];
+
+        float dct = in_data[v*8+u];
+
+        /* Zig-zag and quantize */
+        ret = (dct / 4.0) / quant_tbl[zigzag];
+        ret = ret + 0.5f > (int)ret + 1 ? (int)ret + 1 : (int)ret; 
+        out_data[zigzag] = ret;
+    }
+}
+
+void vec_quantize_block(VF *in_data, VF *out_data, uint8_t *quant_tbl)
+{
+    quantize_block((float *)in_data, (float *)out_data, quant_tbl);
+}
+
+void dct_quant_block_8x8(ULL out_data, uint8_t *quant_tbl)
+{
+    VF mb[8*2];
+    VF mb2[8*2];
+    VSS out_block[8];
+    int16_t *act_out;
+    float *act_mb;
+
+    int i, v, tag = 1;
+
+    for (i=0; i<16; ++i)
+        mb2[i] = spu_convtf(block[i], 0);
+
+    for (v=0; v<8; ++v)
+    {
+        vec_dct_1d(mb2+v*2, mb+v*2);
+    }
+
+    vec_transpose_block(mb, mb2);
+
+    for (v=0; v<8; ++v)
+    {
+        vec_dct_1d(mb2+v*2, mb+v*2);
+    }
+
+    vec_transpose_block(mb, mb2);
+    vec_scale_block(mb2, mb);
+    vec_quantize_block(mb, mb2, quant_tbl);
+
+    act_mb = (float *)mb2;
+    act_out = (int16_t *)out_block;
+    for (i = 0; i < 64; ++i)
+    {
+        act_out[i] = (int16_t)act_mb[i];
+    }
+
+    // send output
+    spu_mfcdma64(out_block, mfc_ea2h(out_data), mfc_ea2l(out_data),
+            8 * sizeof(VSS), tag, MFC_PUT_CMD);
+    spu_writech(MFC_WrTagMask, 1 << tag);
+    spu_mfcstat(MFC_TAG_UPDATE_ALL);
+}
+
+void dct_get_block(dct_params_t *params)
+{
+    int i;
+    VSI tmp[2];
+    VUC *act_block;
+
+    ULL src;
+    int offset;
+    for (i = 0; i < 8; ++i)
+    {
+        src = (ULL) (UL) params->in_data;
+        offset = src % 128;
+        src -= offset;
+        read_row(read_tmp, src, 8, offset);
+
+        act_block = (VUC *)&block[i * 2];
+        *act_block = spu_shuffle(read_tmp[offset / 16],
+                        read_tmp[offset / 16 + 1], mask_dct1[offset % 16]);
+        act_block = (VUC *)&block[i * 2 + 1];
+        *act_block = spu_shuffle(read_tmp[offset / 16],
+                        read_tmp[offset / 16 + 1], mask_dct2[offset % 16]);
+        src = (ULL) (UL) params->prediction;
+        offset = src % 128;
+        src -= offset;
+        read_row(read_tmp, src, 8, offset);
+        act_block = (VUC *)&tmp[0];
+        *act_block = spu_shuffle(read_tmp[offset / 16],
+                        read_tmp[offset / 16 + 1], mask_dct1[offset % 16]);
+        act_block = (VUC *)&tmp[1];
+        *act_block = spu_shuffle(read_tmp[offset / 16],
+                        read_tmp[offset / 16 + 1], mask_dct2[offset % 16]);
+        block[i * 2] = spu_sub(block[i * 2], tmp[0]);
+        block[i * 2 + 1] = spu_sub(block[i * 2 + 1], tmp[1]);
+    }
+}
+
 int main(ULL spe, ULL argp, ULL envp) {
 
     prof_clear();
 
+    // HACK
+    int qp = (int)envp;
+    if (qp > 0)
+    {
+        int i;
+        for (i = 0; i < 64; ++i)
+        {
+            yquanttbl_def[i] = yquanttbl_def[i] / (qp / 10.0);
+            uvquanttbl_def[i] = uvquanttbl_def[i] / (qp / 10.0);
+        }
+    }
+    // ****
+
     sad_params_t params __attribute__((aligned(128)));
+    dct_params_t dct_params __attribute__((aligned(128)));
+    
     int tag = 1;
     int orig_offset;
 
@@ -257,46 +428,75 @@ int main(ULL spe, ULL argp, ULL envp) {
         mbox_data[2] = spu_read_in_mbox();
         mbox_data[3] = spu_read_in_mbox();
 
-        if (mbox_data[0] == SPE_END)
+        if (mbox_data[0] == SPE_SAD)
+        {
+            prof_start();
+            // GET params
+            spu_mfcdma64(&params, mbox_data[2], mbox_data[3], sizeof(sad_params_t),
+                    tag, MFC_GET_CMD);
+            spu_writech(MFC_WrTagMask, 1 << tag);
+            spu_mfcstat(MFC_TAG_UPDATE_ALL);
+            
+            // GET ints
+            w = params.w;
+            spe_nr = params.spe_nr;
+            orig_offset = params.orig_offset;
+            ref_offset = params.ref_offset;
+            orig_x = params.orig_x;
+            orig_y = params.orig_y;
+            ref_w = params.ref_w;
+            ref_h = params.ref_h;
+            sad_w = ref_w - 7;
+            sad_h = ref_h - 7;
+            input_ref = params.ref;
+            
+            ds_init();
+            
+            // GET orig
+            get_orig_input(params.orig, orig_offset);
+
+            // calc
+            ds(orig_x, orig_y);
+
+            // PUT sad_out
+            spu_mfcdma64(&sad_out, mfc_ea2h(params.sad_out), mfc_ea2l(params.sad_out),
+                    sizeof(sad_out_t), tag, MFC_PUT_CMD);
+            spu_writech(MFC_WrTagMask, 1 << tag);
+            spu_mfcstat(MFC_TAG_UPDATE_ALL);
+            
+            // inform PPE about finish
+            spu_write_out_intr_mbox ((unsigned) SPE_FINISH);
+            prof_stop();
+        }
+        else if (mbox_data[0] == SPE_DCT)
+        {
+            uint8_t *quant_tbl;
+            // GET params
+            spu_mfcdma64(&dct_params, mbox_data[2], mbox_data[3], sizeof(dct_params_t),
+                    tag, MFC_GET_CMD);
+            spu_writech(MFC_WrTagMask, 1 << tag);
+            spu_mfcstat(MFC_TAG_UPDATE_ALL);
+
+            dct_get_block(&dct_params);
+
+            if (dct_params.quantization == 0)
+            {
+                quant_tbl = yquanttbl_def;
+            }
+            else
+            {
+                quant_tbl = uvquanttbl_def;
+            }
+
+            dct_quant_block_8x8(dct_params.out_data, quant_tbl);
+            
+            // inform PPE about finish
+            spu_write_out_intr_mbox ((unsigned) SPE_FINISH);
+        }
+        else // SPE_END
+        {
             break;
-
-        prof_start();
-        // GET params
-        spu_mfcdma64(&params, mbox_data[2], mbox_data[3], sizeof(sad_params_t),
-                tag, MFC_GET_CMD);
-        spu_writech(MFC_WrTagMask, 1 << tag);
-        spu_mfcstat(MFC_TAG_UPDATE_ALL);
-        
-        // GET ints
-        w = params.w;
-        spe_nr = params.spe_nr;
-        orig_offset = params.orig_offset;
-        ref_offset = params.ref_offset;
-        orig_x = params.orig_x;
-        orig_y = params.orig_y;
-        ref_w = params.ref_w;
-        ref_h = params.ref_h;
-        sad_w = ref_w - 7;
-        sad_h = ref_h - 7;
-        input_ref = params.ref;
-        
-        ds_init();
-        
-        // GET orig
-        get_orig_input(params.orig, orig_offset);
-
-        // calc
-        ds(orig_x, orig_y);
-
-        // PUT sad_out
-        spu_mfcdma64(&sad_out, mfc_ea2h(params.sad_out), mfc_ea2l(params.sad_out),
-                sizeof(sad_out_t), tag, MFC_PUT_CMD);
-        spu_writech(MFC_WrTagMask, 1 << tag);
-        spu_mfcstat(MFC_TAG_UPDATE_ALL);
-        
-        // inform PPE about finish
-        spu_write_out_intr_mbox ((unsigned) SPE_FINISH);
-        prof_stop();
+        }
     }
 
     prof_write();
