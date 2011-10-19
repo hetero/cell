@@ -13,7 +13,7 @@ static float dct_out[NUM_SPE][8*8] __attribute__((aligned(128)));
 
 static dct_params_t dct_params[NUM_SPE] __attribute__((aligned(128)));
 
-int SPE_NUMBERS[6] = {0,1,2,3,4,5};
+int SPE_NUMBERS[6];
 
 // SAD globals
 int global_mb_x, global_mb_y, global_mb_rows, global_mb_cols, global_cc;
@@ -185,7 +185,7 @@ static void dct_block_8x8(int spe_nr, int width, int height, int row, int col, u
 //        print_block(out_data);
     int16_t *ptr_16 = out_data + row * width + col * 8;
     for (r = 0; r < 64; ++r)
-        ptr_16[r] = (int16_t)dct_out[spe_nr][r];
+        ptr_16[r] = (int16_t)(dct_out[spe_nr][r]);
 }
 
 void *run_smart_thread(void *void_spe_nr) {

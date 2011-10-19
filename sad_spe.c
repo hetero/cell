@@ -417,14 +417,11 @@ int main(ULL spe, ULL argp, ULL envp) {
 
     // HACK
     int qp = (int)envp;
-    if (qp > 0)
+    int i;
+    for (i = 0; i < 64; ++i)
     {
-        int i;
-        for (i = 0; i < 64; ++i)
-        {
-            yquanttbl_def[i] = yquanttbl_def[i] / (qp / 10.0);
-            uvquanttbl_def[i] = uvquanttbl_def[i] / (qp / 10.0);
-        }
+        yquanttbl_def[i] = yquanttbl_def[i] / (qp / 10.0);
+        uvquanttbl_def[i] = uvquanttbl_def[i] / (qp / 10.0);
     }
     // ****
 
