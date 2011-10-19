@@ -7,6 +7,7 @@
 typedef struct {
     spe_context_ptr_t spe;
     sad_params_t *params;
+    int qp;
 } thread_arg_t;
 
 #endif

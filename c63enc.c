@@ -110,7 +110,7 @@ void *run_spe(void *thread_arg) {
 
     entry = SPE_DEFAULT_ENTRY;
     printf("Running SPE...\n");
-    ret = spe_context_run(arg->spe, &entry, 0, NULL, NULL, &stop_info);
+    ret = spe_context_run(arg->spe, &entry, 0, NULL, (void *) (unsigned long) arg->qp, &stop_info);
     if (ret < 0) {
         perror("spe_context_run");
         return NULL;
@@ -119,7 +119,7 @@ void *run_spe(void *thread_arg) {
     return NULL;
 }
 
-void spe_init() {
+void spe_init(uint8_t qp) {
     int i, ret;
     prog = spe_image_open("sad_spe.elf");
     if (!prog) {
@@ -140,6 +140,10 @@ void spe_init() {
             exit(1);
         }
         run_arg[i].spe = spe[i];
+        if (i == 0)
+            run_arg[i].qp = qp;
+        else
+            run_arg[i].qp = 0;
         ret = pthread_create(&run_thread[i], NULL, run_spe, &run_arg[i]);
         if (ret) {
             perror("run_pthread_create");
@@ -199,9 +203,9 @@ static void c63_encode_image(struct c63_common *cm, yuv_t *image)
     }
 
     /* DCT and Quantization */
-    dct_quantize(image->Y, cm->curframe->predicted->Y, cm->padw[0], cm->padh[0], cm->curframe->residuals->Ydct, cm->quanttbl[0]);
-    dct_quantize(image->U, cm->curframe->predicted->U, cm->padw[1], cm->padh[1], cm->curframe->residuals->Udct, cm->quanttbl[1]);
-    dct_quantize(image->V, cm->curframe->predicted->V, cm->padw[2], cm->padh[2], cm->curframe->residuals->Vdct, cm->quanttbl[2]);
+    dct_quantize(image->Y, cm->curframe->predicted->Y, cm->padw[0], cm->padh[0], cm->curframe->residuals->Ydct, cm->quanttbl[0], 0);
+    dct_quantize(image->U, cm->curframe->predicted->U, cm->padw[1], cm->padh[1], cm->curframe->residuals->Udct, cm->quanttbl[1], 1);
+    dct_quantize(image->V, cm->curframe->predicted->V, cm->padw[2], cm->padh[2], cm->curframe->residuals->Vdct, cm->quanttbl[2], 2);
 
     /* Reconstruct frame for inter-prediction */
     dequantize_idct(cm->curframe->residuals->Ydct, cm->curframe->predicted->Y, cm->ypw, cm->yph, cm->curframe->recons->Y, cm->quanttbl[0]);
@@ -314,13 +318,14 @@ int main(int argc, char **argv)
     }
 
 //    predfile = fopen("/tmp/pred.yuv", "wb");
-
-    spe_init();
-    if (pthread_mutex_init(&mutex, 0) != 0)
-        perror("Mutex init failed.");
-
+    
     struct c63_common *cm = init_c63_enc(width, height);
     cm->e_ctx.fp = outfile;
+
+
+    spe_init(cm->qp);
+    if (pthread_mutex_init(&mutex, 0) != 0)
+        perror("Mutex init failed.");
 
 
     /* Calculate the padded width and height */

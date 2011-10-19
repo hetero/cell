@@ -8,6 +8,7 @@
 #define SPE_DCT 4
 
 typedef unsigned long long ULL;
+typedef unsigned long UL;
 
 typedef struct {
             int sad, x, y, pad;
@@ -32,8 +33,7 @@ typedef struct {
     ULL in_data;
     ULL prediction;
     ULL out_data;
-    ULL quantization;
+    int quantization;
+    int pad[1];
 } dct_params_t;
-
-
 #endif

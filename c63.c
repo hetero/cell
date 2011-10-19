@@ -9,6 +9,8 @@ static sad_out_t spe_out[NUM_SPE] __attribute__((aligned(128)));
 static sad_params_t sad_params[NUM_SPE] __attribute__((aligned(128)));
 static thread_arg_t th_arg[NUM_SPE];
 
+static float dct_out[NUM_SPE][8*8] __attribute__((aligned(128)));
+
 static dct_params_t dct_params[NUM_SPE] __attribute__((aligned(128)));
 
 int SPE_NUMBERS[6] = {0,1,2,3,4,5};
@@ -20,8 +22,8 @@ uint8_t *global_ref;
 struct c63_common *global_cm;
 
 // DCT globals
-int g_dct_row, g_dct_col, g_dct_width, g_dct_height;
-uint8_t *g_dct_in_data, *g_dct_prediction, *g_dct_quantization;
+int g_dct_row, g_dct_col, g_dct_width, g_dct_height, g_dct_quantization;
+uint8_t *g_dct_in_data, *g_dct_prediction;
 int16_t *g_dct_out_data;
 
 void lock() {
@@ -144,20 +146,30 @@ static void me_block_8x8(int spe_nr, struct c63_common *cm, int mb_x, int mb_y, 
     run_sad_spe(&th_arg[spe_nr]);
 }
 
-static void dct_block_8x8(int spe_nr, int width, int height, int row, int col, uint8_t *in_data, uint8_t *prediction, int16_t *out_data, uint8_t *quantization) 
+static void dct_block_8x8(int spe_nr, int width, int height, int row, int col, uint8_t *in_data, uint8_t *prediction, int16_t *out_data, int quantization) 
 {
+    int r, c;
+    int16_t *act_out;
     uint8_t *ptr = in_data + row * width + col;
     dct_params[spe_nr].in_data = (unsigned long) ptr;
 
     ptr = prediction + row * width + col;
     dct_params[spe_nr].prediction = (unsigned long) ptr;
 
-    uint16_t *out_ptr = out_data + row * width + col;
-    dct_params[spe_nr].out_data = (unsigned long) out_ptr;
+    dct_params[spe_nr].out_data = (unsigned long) &dct_out[spe_nr];
 
-    dct_params[spe_nr].quantization = (unsigned long) quantization;
+    dct_params[spe_nr].quantization = quantization;
 
     run_dct_spe(spe_nr, &dct_params[spe_nr]);
+    
+    act_out = out_data + row * width + col;
+    for (r = 0; r < 8; ++r)
+    {
+        for (c = 0; c < 8; ++c)
+        {
+            act_out[r * width + c] = dct_out[spe_nr][r * 8 + c];
+        }
+    }
 }
 
 void *run_smart_thread(void *void_spe_nr) {
@@ -230,7 +242,7 @@ void *run_smart_thread(void *void_spe_nr) {
             int height = g_dct_height;
             uint8_t *in_data = g_dct_in_data;
             uint8_t *prediction = g_dct_prediction;
-            uint8_t *quantization = g_dct_quantization;
+            int quantization = g_dct_quantization;
             int16_t *out_data = g_dct_out_data;
 
             if (row < height && col < width)

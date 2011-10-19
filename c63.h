@@ -46,8 +46,8 @@ extern uint8_t *global_ref;
 extern struct c63_common *global_cm;
 
 
-extern int g_dct_col, g_dct_row, g_dct_width, g_dct_height;
-extern uint8_t *g_dct_in_data, *g_dct_prediction, *g_dct_quantization;
+extern int g_dct_col, g_dct_row, g_dct_width, g_dct_height, g_dct_quantization;
+extern uint8_t *g_dct_in_data, *g_dct_prediction;
 extern int16_t *g_dct_out_data;
 
 void lock();
@@ -144,7 +144,7 @@ void dequantize_idct(int16_t *in_data, uint8_t *prediction, uint32_t width, uint
 			 uint8_t *out_data, uint8_t *quantization);
 void dct_quantize(uint8_t *in_data, uint8_t *prediction,
         uint32_t width, uint32_t height,
-        int16_t *out_data, uint8_t *quantization);
+        int16_t *out_data, uint8_t *quant_tbl, int quantization);
 
 void destroy_frame(struct frame *f);
 struct frame* create_frame(struct c63_common *cm, yuv_t *image);
