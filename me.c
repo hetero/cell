@@ -16,21 +16,6 @@
 void c63_motion_estimate(struct c63_common *cm)
 {
     /* Compare this frame with previous reconstructed frame */
-    int spe_nr;
-    lock();
-    mode = WAIT_MODE; // TODO
-    int i;    
-    spe_nr = rand() % NUM_SPE;
-    for (i = 0; i < NUM_SPE; i++) {
-        int ret = pthread_create(&smart_thread[spe_nr], NULL, run_smart_thread, 
-               &SPE_NUMBERS[spe_nr]); 
-        if (ret) {
-            perror("pthread_create");
-            exit(1);
-        }
-        spe_nr = (spe_nr + 1) % NUM_SPE;
-    }
-
     global_mb_x = 0;
     global_mb_y = 0;
     global_mb_rows = cm->mb_rows;
@@ -41,11 +26,13 @@ void c63_motion_estimate(struct c63_common *cm)
     global_cm = cm;
 
     mode = SAD_MODE;
-
     unlock();
 
-    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) 
-        pthread_join(smart_thread[spe_nr], NULL);
+    lock();
+    while (mode != WAIT_MODE) {
+        unlock();
+        lock();
+    }
 }
 
 /* Motion compensation for 8x8 block */

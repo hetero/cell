@@ -1,5 +1,8 @@
 #include "c63.h"
 
+int working_spes;
+int is_working[NUM_SPE];
+
 spe_context_ptr_t spe[8] __attribute__((aligned(128)));
 int mode;
 pthread_mutex_t mutex;
@@ -196,11 +199,30 @@ void *run_smart_thread(void *void_spe_nr) {
             unlock();
             lock();
         }
+
         if (mode == OFF_MODE) {
             unlock();
             break;
         }
-        else if (mode == SAD_MODE)
+
+        if (mode == ENDING_JOB_MODE) {
+            if (is_working[spe_nr]) {
+                is_working[spe_nr] = 0;
+                working_spes--;
+                if (working_spes == 0)
+                    mode = WAIT_MODE;
+            }
+            unlock();
+            continue;
+        }
+
+        if ((mode == SAD_MODE || mode == DCT_MODE || mode == IDCT_MODE)
+                && !is_working[spe_nr]) { 
+            working_spes++;
+            is_working[spe_nr] = 1;
+        }
+
+        if (mode == SAD_MODE)
         {
             // coords of block
             int mb_x = global_mb_x;
@@ -236,18 +258,11 @@ void *run_smart_thread(void *void_spe_nr) {
                     global_ref = cm->refframe->recons->V;
                 }
                 else { // global_cc == 2
-                    global_orig = cm->curframe->orig->Y;
-                    global_ref = cm->refframe->recons->Y;
-                    global_mb_cols *= 2;
-                    global_mb_rows *= 2;
-                    mode = OFF_MODE;
+                    mode = ENDING_JOB_MODE;
                 }
                 global_cc = (global_cc + 1) % 3;
                 
                 unlock();
-                //TODO: 
-                if (cc == 2) 
-                    break;
             }
         }
         else if (mode == DCT_MODE)
@@ -275,9 +290,8 @@ void *run_smart_thread(void *void_spe_nr) {
             }
             else
             {
-                mode = OFF_MODE;
+                mode = ENDING_JOB_MODE;
                 unlock();
-                break;
             }
         }
     }

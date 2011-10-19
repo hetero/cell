@@ -120,6 +120,8 @@ void *run_spe(void *thread_arg) {
 }
 
 void spe_init(uint8_t qp) {
+    working_spes = 0;
+
     int i, ret;
     prog = spe_image_open("sad_spe.elf");
     if (!prog) {
@@ -128,6 +130,7 @@ void spe_init(uint8_t qp) {
     }   
 
     for (i = 0; i < NUM_SPE; i++) {
+        is_working[i] = 0;
         spe[i] = spe_context_create(0, NULL);
         if (!spe[i]) {
             perror("spe_context_create");
@@ -194,7 +197,7 @@ static void c63_encode_image(struct c63_common *cm, yuv_t *image)
     {
         /* Motion Estimation */
         c63_motion_estimate(cm);
-
+        
         /* Motion Compensation */
         c63_motion_compensate(cm);
     }
@@ -328,6 +331,19 @@ int main(int argc, char **argv)
     spe_init(cm->qp);
     if (pthread_mutex_init(&mutex, 0) != 0)
         perror("Mutex init failed.");
+    
+    lock();
+
+    int i;
+    int spe_nr = rand() % NUM_SPE;
+    for (i = 0; i < NUM_SPE; i++) {
+        int ret = pthread_create(&smart_thread[spe_nr], NULL, run_smart_thread,                &SPE_NUMBERS[spe_nr]);
+        if (ret) { 
+            perror("pthread_create");
+            exit(1);
+        }       
+        spe_nr = (spe_nr + 1) % NUM_SPE;
+    }
 
 
     /* Calculate the padded width and height */
@@ -353,7 +369,7 @@ int main(int argc, char **argv)
 
 
     /* Encode input frames */
-    int numframes = 0;;
+    int numframes = 0;
     while(!feof(infile))
     {
         image = read_yuv(infile);
@@ -380,10 +396,18 @@ int main(int argc, char **argv)
     fclose(outfile);
     fclose(infile);
 //    fclose(predfile);
+    
+    mode = OFF_MODE;
+    unlock();
+
+    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++)
+        pthread_join(smart_thread[spe_nr], NULL);
+
     if (pthread_mutex_destroy (&mutex) != 0)
         perror("mutex destroy failed");
-    spe_dispose();
 
+    spe_dispose();
+    
     print_time();
     return EXIT_SUCCESS;
 }

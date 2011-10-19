@@ -29,8 +29,13 @@
 
 #define WAIT_MODE 1
 #define SAD_MODE 2
-#define OFF_MODE 3
-#define DCT_MODE 4
+#define DCT_MODE 3
+#define IDCT_MODE 4
+#define ENDING_JOB_MODE 5
+#define OFF_MODE 6
+
+extern int working_spes;
+extern int is_working[NUM_SPE];
 
 extern spe_context_ptr_t spe[8];
 extern int mode;

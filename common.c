@@ -108,8 +108,6 @@ void dct_quantize(uint8_t *in_data, uint8_t *prediction,
     }
   */
     
-    lock();
-    mode = DCT_MODE;
     g_dct_row = 0;
     g_dct_col = 0;
     g_dct_width = width;
@@ -118,22 +116,15 @@ void dct_quantize(uint8_t *in_data, uint8_t *prediction,
     g_dct_prediction = prediction;
     g_dct_quantization = quantization;
     g_dct_out_data = out_data;
+    
+    mode = DCT_MODE;
     unlock();
-    int i;
-    int spe_nr = rand() % NUM_SPE;
-    for (i = 0; i < NUM_SPE; i++) {
-        int ret = pthread_create(&smart_thread[spe_nr], NULL, run_smart_thread, 
-               &SPE_NUMBERS[spe_nr]); 
-        if (ret) {
-            perror("pthread_create");
-            exit(1);
-        }
-        spe_nr = (spe_nr + 1) % NUM_SPE;
-    }
 
-    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) 
-        pthread_join(smart_thread[spe_nr], NULL);
-        
+    lock();
+    while (mode != WAIT_MODE) {
+        unlock();
+        lock();
+    }
 }
 
 void destroy_frame(struct frame *f)
