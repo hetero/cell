@@ -6,6 +6,7 @@
 #define SPE_FINISH 2
 #define SPE_SAD 3
 #define SPE_DCT 4
+#define SPE_IDCT 5
 
 typedef unsigned long long ULL;
 typedef unsigned long UL;

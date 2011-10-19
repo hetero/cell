@@ -205,9 +205,15 @@ static void c63_encode_image(struct c63_common *cm, yuv_t *image)
     dct_quantize(image->V, cm->curframe->predicted->V, cm->padw[2], cm->padh[2], cm->curframe->residuals->Vdct, cm->quanttbl[2], 2);
 
     /* Reconstruct frame for inter-prediction */
+    /*
     dequantize_idct(cm->curframe->residuals->Ydct, cm->curframe->predicted->Y, cm->ypw, cm->yph, cm->curframe->recons->Y, cm->quanttbl[0]);
     dequantize_idct(cm->curframe->residuals->Udct, cm->curframe->predicted->U, cm->upw, cm->uph, cm->curframe->recons->U, cm->quanttbl[1]);
     dequantize_idct(cm->curframe->residuals->Vdct, cm->curframe->predicted->V, cm->vpw, cm->vph, cm->curframe->recons->V, cm->quanttbl[2]);
+    */
+    /* Reconstruct frame for inter-prediction */
+    dequantize_idct_spu(cm->curframe->residuals->Ydct, cm->curframe->predicted->Y, cm->ypw, cm->yph, cm->curframe->recons->Y, 0);
+    dequantize_idct_spu(cm->curframe->residuals->Udct, cm->curframe->predicted->U, cm->upw, cm->uph, cm->curframe->recons->U, 1);
+    dequantize_idct_spu(cm->curframe->residuals->Vdct, cm->curframe->predicted->V, cm->vpw, cm->vph, cm->curframe->recons->V, 2);
 
     /* dump_image can be used here to check if the prediction is correct. */
     //dump_image(cm->curframe->predicted, cm->width, cm->height, predfile);

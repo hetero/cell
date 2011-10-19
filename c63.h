@@ -31,6 +31,7 @@
 #define SAD_MODE 2
 #define OFF_MODE 3
 #define DCT_MODE 4
+#define IDCT_MODE 5
 
 extern spe_context_ptr_t spe[8];
 extern int mode;
@@ -49,6 +50,11 @@ extern struct c63_common *global_cm;
 extern int g_dct_col, g_dct_row, g_dct_width, g_dct_height, g_dct_quantization;
 extern uint8_t *g_dct_in_data, *g_dct_prediction;
 extern int16_t *g_dct_out_data;
+
+extern int g_idct_row, g_idct_col, g_idct_width, g_idct_height, g_idct_quantization;
+extern int16_t *g_idct_in_data;
+extern uint8_t *g_idct_prediction, *g_idct_out_data;
+
 
 void lock();
 void unlock();
@@ -142,6 +148,8 @@ void dequant_idct_block_8x8(int16_t *in_data, int16_t *out_data, uint8_t *quant_
 void write_frame(struct c63_common *cm);
 void dequantize_idct(int16_t *in_data, uint8_t *prediction, uint32_t width, uint32_t height,
 			 uint8_t *out_data, uint8_t *quantization);
+void dequantize_idct_spu(int16_t *in_data, uint8_t *prediction, uint32_t width, uint32_t height,
+			 uint8_t *out_data, int quantization);
 void dct_quantize(uint8_t *in_data, uint8_t *prediction,
         uint32_t width, uint32_t height,
         int16_t *out_data, uint8_t *quant_tbl, int quantization);

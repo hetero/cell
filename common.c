@@ -43,11 +43,42 @@ void dequantize_idct_row(int16_t *in_data, uint8_t *prediction, int w, int h, in
 void dequantize_idct(int16_t *in_data, uint8_t *prediction, uint32_t width, uint32_t height,
 			 uint8_t *out_data, uint8_t *quantization)
 {
+    
     int y;
     for (y=0; y<height; y+=8)
     {
         dequantize_idct_row(in_data+y*width, prediction+y*width, width, height, y, out_data+y*width, quantization);
     }
+}
+
+void dequantize_idct_spu(int16_t *in_data, uint8_t *prediction, uint32_t width, uint32_t height,
+			 uint8_t *out_data, int quantization)
+{    
+    lock();
+    mode = IDCT_MODE;
+    g_idct_row = 0;
+    g_idct_col = 0;
+    g_idct_width = width;
+    g_idct_height = height;
+    g_idct_in_data = in_data;
+    g_idct_prediction = prediction;
+    g_idct_quantization = quantization;
+    g_idct_out_data = out_data;
+    unlock();
+    int i;
+    int spe_nr = rand() % NUM_SPE;
+    for (i = 0; i < NUM_SPE; i++) {
+        int ret = pthread_create(&smart_thread[spe_nr], NULL, run_smart_thread, 
+               &SPE_NUMBERS[spe_nr]); 
+        if (ret) {
+            perror("pthread_create");
+            exit(1);
+        }
+        spe_nr = (spe_nr + 1) % NUM_SPE;
+    }
+
+    for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++) 
+        pthread_join(smart_thread[spe_nr], NULL);
 }
 
 void print_common(int16_t *data)

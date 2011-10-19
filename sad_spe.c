@@ -274,6 +274,41 @@ void vec_dct_1d(VF *in_data, VF *out_data)
         f_out[j] = f_tmp[0] + f_tmp[1] + f_tmp[2] + f_tmp[3];
     }
 }
+/*
+static void idct_1d(float *in_data, float *out_data)
+{
+    int i,j;
+
+    for (j=0; j<8; ++j)
+    {
+        float idct = 0;
+
+        for (i=0; i<8; ++i)
+        {
+            idct += in_data[i] * dctlookup[j][i];
+        }
+
+        out_data[j] = idct;
+    }
+}
+*/
+void vec_idct_1d(VF *in_data, VF *out_data)
+{
+    int j;
+    float *f_tmp;
+    float *f_out = (float *)out_data;
+
+    VF tmp[2];
+
+    for (j=0; j<8; ++j)
+    {
+        tmp[0] = spu_madd(in_data[0], vec_idctlookup[j][0], vec_zero);
+        tmp[1] = spu_madd(in_data[1], vec_idctlookup[j][1], tmp[0]);
+        f_tmp = (float *)(&tmp[1]);
+        f_out[j] = f_tmp[0] + f_tmp[1] + f_tmp[2] + f_tmp[3];
+    }
+}
+
 
 static void vec_scale_block(VF *in_data, VF *out_data)
 {
@@ -305,7 +340,7 @@ void quantize_block(float *in_data, float *out_data, uint8_t *quant_tbl)
 
         /* Zig-zag and quantize */
         ret = (dct / 4.0) / quant_tbl[zigzag];
-        ret = ret + 0.5f > (int)ret + 1 ? (int)ret + 1 : (int)ret; 
+        ret = ret + 0.5f >= (int)ret + 1 ? (int)ret + 1 : (int)ret; 
         out_data[zigzag] = ret;
     }
 }
@@ -313,6 +348,29 @@ void quantize_block(float *in_data, float *out_data, uint8_t *quant_tbl)
 void vec_quantize_block(VF *in_data, VF *out_data, uint8_t *quant_tbl)
 {
     quantize_block((float *)in_data, (float *)out_data, quant_tbl);
+}
+
+static void dequantize_block(float *in_data, float *out_data, uint8_t *quant_tbl)
+{
+    int zigzag;
+    float ret;
+    for (zigzag=0; zigzag < 64; ++zigzag)
+    {
+        uint8_t u = zigzag_U[zigzag];
+        uint8_t v = zigzag_V[zigzag];
+
+        float dct = in_data[zigzag];
+
+        /* Zig-zag and de-quantize */
+        ret = (dct * quant_tbl[zigzag]) / 4.0;
+        ret = ret + 0.5f >= (int)ret + 1 ? (int)ret + 1 : (int)ret;
+        out_data[v*8+u] = ret;
+    }
+}
+
+void vec_dequantize_block(VF *in_data, VF *out_data, uint8_t *quant_tbl)
+{
+    dequantize_block((float *)in_data, (float *)out_data, quant_tbl);
 }
 
 void dct_quant_block_8x8(ULL out_data, uint8_t *quant_tbl)
@@ -359,6 +417,40 @@ void dct_quant_block_8x8(ULL out_data, uint8_t *quant_tbl)
     spu_mfcstat(MFC_TAG_UPDATE_ALL);
 }
 
+static void idct_quant_block_8x8(uint8_t *quant_tbl)
+{
+    VF mb[8*2];
+    VF mb2[8*2];
+
+    int i, v;
+
+    for (i=0; i<16; ++i)
+        mb[i] = spu_convtf(block[i], 0);
+
+    vec_dequantize_block(mb, mb2, quant_tbl);
+
+    vec_scale_block(mb2, mb);
+
+    for (v=0; v<8; ++v)
+    {
+        vec_idct_1d(mb+v*2, mb2+v*2);
+    }
+
+    vec_transpose_block(mb2, mb);
+
+    for (v=0; v<8; ++v)
+    {
+        vec_idct_1d(mb+v*2, mb2+v*2);
+    }
+
+    vec_transpose_block(mb2, mb);
+
+    for (i = 0; i < 16; ++i)
+    {
+        block[i] = spu_convts(mb[i], 0);
+    }
+}
+
 void dct_get_block(dct_params_t *params)
 {
     int i;
@@ -395,10 +487,41 @@ void dct_get_block(dct_params_t *params)
     }
 }
 
+static void idct_write_results(dct_params_t *idct_params)
+{
+    int i, tag = 1;
+    VSI tmp[2];
+    VUC *act_block;
+
+    ULL src;
+    int offset;
+    for (i = 0; i < 8; ++i)
+    {
+        src = (ULL) (UL) (idct_params->prediction + i * idct_params->width);
+        offset = src % 128;
+        src -= offset;
+        read_row(read_tmp, src, 8, offset);
+        act_block = (VUC *)&tmp[0];
+        *act_block = spu_shuffle(read_tmp[offset / 16],
+                        read_tmp[offset / 16 + 1], mask_dct1[offset % 16]);
+        act_block = (VUC *)&tmp[1];
+        *act_block = spu_shuffle(read_tmp[offset / 16],
+                        read_tmp[offset / 16 + 1], mask_dct2[offset % 16]);
+        block[i * 2] = spu_add(block[i * 2], tmp[0]);
+        block[i * 2 + 1] = spu_add(block[i * 2 + 1], tmp[1]);
+    }
+    
+    // send output
+    spu_mfcdma64(block, mfc_ea2h(idct_params->out_data), mfc_ea2l(idct_params->out_data),
+            8 * 2 * sizeof(VSI), tag, MFC_PUT_CMD);
+    spu_writech(MFC_WrTagMask, 1 << tag);
+    spu_mfcstat(MFC_TAG_UPDATE_ALL);
+}
+
 void print_spe(int *data)
 {
     int i, j;
-    printf("First block before DCT on SPE:\n");
+    printf("First block before IDCT on SPE:\n");
     for (i = 0; i < 8; i++)
     {
         for (j = 0; j < 8; j++)
@@ -410,6 +533,18 @@ void print_spe(int *data)
     fflush(stdout);
 }
 
+void idct_get_block(dct_params_t *idct_params)
+{
+    ULL src = (ULL) (UL) (idct_params->in_data);
+    // residuals are aligned
+    read_row(read_tmp, src, 128, 0);
+    int *act_block = (int *)block;
+    short *act_in = (short *)read_tmp;
+    int i;
+    for (i = 0; i < 64; i++)
+        act_block[i] = act_in[i];
+//    print_spe((int *)block);
+}
 
 int main(ULL spe, ULL argp, ULL envp) {
 
@@ -427,6 +562,7 @@ int main(ULL spe, ULL argp, ULL envp) {
 
     sad_params_t params __attribute__((aligned(128)));
     dct_params_t dct_params __attribute__((aligned(128)));
+    dct_params_t idct_params __attribute__((aligned(128)));
     
     int tag = 1;
     int orig_offset;
@@ -510,6 +646,33 @@ int main(ULL spe, ULL argp, ULL envp) {
 
             dct_quant_block_8x8(dct_params.out_data, quant_tbl);
             
+            // inform PPE about finish
+            spu_write_out_intr_mbox ((unsigned) SPE_FINISH);
+        }
+        else if (mbox_data[0] == SPE_IDCT)
+        {
+            uint8_t *quant_tbl;
+            // GET params
+            spu_mfcdma64(&idct_params, mbox_data[2], mbox_data[3], sizeof(dct_params_t),
+                    tag, MFC_GET_CMD);
+            spu_writech(MFC_WrTagMask, 1 << tag);
+            spu_mfcstat(MFC_TAG_UPDATE_ALL);
+
+            idct_get_block(&idct_params);
+
+            if (idct_params.quantization == 0)
+            {
+                quant_tbl = yquanttbl_def;
+            }
+            else
+            {
+                quant_tbl = uvquanttbl_def;
+            }
+
+            idct_quant_block_8x8(quant_tbl); 
+
+            idct_write_results(&idct_params); 
+
             // inform PPE about finish
             spu_write_out_intr_mbox ((unsigned) SPE_FINISH);
         }

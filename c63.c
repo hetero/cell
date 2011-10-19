@@ -10,8 +10,10 @@ static sad_params_t sad_params[NUM_SPE] __attribute__((aligned(128)));
 static thread_arg_t th_arg[NUM_SPE];
 
 static float dct_out[NUM_SPE][8*8] __attribute__((aligned(128)));
+static int idct_out[NUM_SPE][8*8] __attribute__((aligned(128)));
 
 static dct_params_t dct_params[NUM_SPE] __attribute__((aligned(128)));
+static dct_params_t idct_params[NUM_SPE] __attribute__((aligned(128)));
 
 int SPE_NUMBERS[6];
 
@@ -25,6 +27,11 @@ struct c63_common *global_cm;
 int g_dct_row, g_dct_col, g_dct_width, g_dct_height, g_dct_quantization;
 uint8_t *g_dct_in_data, *g_dct_prediction;
 int16_t *g_dct_out_data;
+
+// IDCT globals
+int g_idct_row, g_idct_col, g_idct_width, g_idct_height, g_idct_quantization;
+int16_t *g_idct_in_data;
+uint8_t *g_idct_prediction, *g_idct_out_data;
 
 void lock() {
     if (pthread_mutex_lock(&mutex) != 0)
@@ -87,7 +94,20 @@ static void run_dct_spe(int spe_nr, dct_params_t *dct_params)
     spe_in_mbox_write(spe[spe_nr], mbox_data, 4, SPE_MBOX_ALL_BLOCKING);
     spe_out_intr_mbox_read(spe[spe_nr], mbox_data, 1, SPE_MBOX_ALL_BLOCKING);
 }
-    
+
+static void run_idct_spe(int spe_nr, dct_params_t *idct_params)
+{
+    unsigned mbox_data[4];
+    ULL params = (unsigned long) idct_params;
+    mbox_data[0] = SPE_IDCT;
+    mbox_data[1] = 0;
+    mbox_data[2] = (unsigned)(params >> 32);
+    mbox_data[3] = (unsigned)params;
+
+    spe_in_mbox_write(spe[spe_nr], mbox_data, 4, SPE_MBOX_ALL_BLOCKING);
+    spe_out_intr_mbox_read(spe[spe_nr], mbox_data, 1, SPE_MBOX_ALL_BLOCKING);
+}
+
 /* Motion estimation for 8x8 block */
 static void me_block_8x8(int spe_nr, struct c63_common *cm, int mb_x, int mb_y, uint8_t *orig, uint8_t *ref, int cc)
 {
@@ -164,7 +184,7 @@ void print_block(signed short *data)
 
 static void dct_block_8x8(int spe_nr, int width, int height, int row, int col, uint8_t *in_data, uint8_t *prediction, int16_t *out_data, int quantization) 
 {
-    int r, c;
+    int r;
     int16_t *act_out;
     uint8_t *ptr = in_data + row * width + col;
     dct_params[spe_nr].in_data = (unsigned long) ptr;
@@ -186,6 +206,38 @@ static void dct_block_8x8(int spe_nr, int width, int height, int row, int col, u
     int16_t *ptr_16 = out_data + row * width + col * 8;
     for (r = 0; r < 64; ++r)
         ptr_16[r] = (int16_t)(dct_out[spe_nr][r]);
+}
+
+static void idct_block_8x8(int spe_nr, int width, int height, int row, int col, int16_t *in_data, uint8_t *prediction, uint8_t *out_data, int quantization)
+{
+    int16_t *ptr_16 = in_data + row * width + col * 8;
+    idct_params[spe_nr].in_data = (unsigned long) ptr_16;
+    
+    uint8_t *ptr = prediction + row * width + col;
+    idct_params[spe_nr].prediction = (unsigned long) ptr;
+
+    //ptr = out_data + row * width + col;
+    idct_params[spe_nr].out_data = (unsigned long) idct_out[spe_nr];
+
+    idct_params[spe_nr].quantization = quantization;
+    idct_params[spe_nr].width = width;
+
+    run_idct_spe(spe_nr, &idct_params[spe_nr]);
+    
+    ptr = out_data + row * width + col;
+    int r, c;
+    for (r = 0; r < 8; ++r)
+    {
+        for (c = 0; c < 8; ++c)
+        {
+            int ret = idct_out[spe_nr][r * 8 + c];
+            if (ret < 0)
+                ret = 0;
+            else if (ret > 255)
+                ret = 255;
+            ptr[r * width + c] = (uint8_t)ret;
+        }
+    }
 }
 
 void *run_smart_thread(void *void_spe_nr) {
@@ -272,6 +324,36 @@ void *run_smart_thread(void *void_spe_nr) {
                 unlock();
                 
                 dct_block_8x8(spe_nr, width, height, row, col, in_data, prediction, out_data, quantization); 
+            }
+            else
+            {
+                mode = OFF_MODE;
+                unlock();
+                break;
+            }
+        }
+        else if (mode == IDCT_MODE)
+        {
+            int row = g_idct_row;
+            int col = g_idct_col;
+            int width = g_idct_width;
+            int height = g_idct_height;
+            int16_t *in_data = g_idct_in_data;
+            uint8_t *prediction = g_idct_prediction;
+            uint8_t *out_data = g_idct_out_data;
+            int quantization = g_idct_quantization;
+
+            if (row < height && col < width)
+            {
+                g_idct_col += 8;
+                if (g_idct_col >= width)
+                {
+                    g_idct_col = 0;
+                    g_idct_row += 8;
+                }
+                unlock();
+
+                idct_block_8x8(spe_nr, width, height, row, col, in_data, prediction, out_data, quantization);
             }
             else
             {
