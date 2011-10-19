@@ -264,13 +264,13 @@ void vec_dct_1d(VF *in_data, VF *out_data)
     float *f_tmp;
     float *f_out = (float *)out_data;
 
-    VF tmp;
+    VF tmp[2];
 
     for (j=0; j<8; ++j)
     {
-        tmp = spu_madd(in_data[0], vec_dctlookup[j][0], vec_zero);
-        tmp = spu_madd(in_data[1], vec_dctlookup[j][1], tmp);
-        f_tmp = (float *)(&tmp);
+        tmp[0] = spu_madd(in_data[0], vec_dctlookup[j][0], vec_zero);
+        tmp[1] = spu_madd(in_data[1], vec_dctlookup[j][1], tmp[0]);
+        f_tmp = (float *)(&tmp[1]);
         f_out[j] = f_tmp[0] + f_tmp[1] + f_tmp[2] + f_tmp[3];
     }
 }
@@ -315,15 +315,18 @@ void vec_quantize_block(VF *in_data, VF *out_data, uint8_t *quant_tbl)
     quantize_block((float *)in_data, (float *)out_data, quant_tbl);
 }
 
-void dct_quant_block_8x8(VSI *in_data, ULL out_data, uint8_t *quant_tbl)
+void dct_quant_block_8x8(ULL out_data, uint8_t *quant_tbl)
 {
     VF mb[8*2];
     VF mb2[8*2];
+    VSS out_block[8];
+    int16_t *act_out;
+    float *act_mb;
 
     int i, v, tag = 1;
 
     for (i=0; i<16; ++i)
-        mb2[i] = spu_convtf(in_data[i], 0);
+        mb2[i] = spu_convtf(block[i], 0);
 
     for (v=0; v<8; ++v)
     {
@@ -340,15 +343,19 @@ void dct_quant_block_8x8(VSI *in_data, ULL out_data, uint8_t *quant_tbl)
     vec_transpose_block(mb, mb2);
     vec_scale_block(mb2, mb);
     vec_quantize_block(mb, mb2, quant_tbl);
-    
+
+    act_mb = (float *)mb2;
+    act_out = (int16_t *)out_block;
+    for (i = 0; i < 64; ++i)
+    {
+        act_out[i] = (int16_t)act_mb[i];
+    }
+
     // send output
-    spu_mfcdma64(mb2, mfc_ea2h(out_data), mfc_ea2l(out_data),
-            8 * 2 * sizeof(VF), tag, MFC_PUT_CMD);
+    spu_mfcdma64(out_block, mfc_ea2h(out_data), mfc_ea2l(out_data),
+            8 * sizeof(VSS), tag, MFC_PUT_CMD);
     spu_writech(MFC_WrTagMask, 1 << tag);
     spu_mfcstat(MFC_TAG_UPDATE_ALL);
-    
-    // inform PPE about finish
-    spu_write_out_intr_mbox ((unsigned) SPE_FINISH);
 }
 
 void dct_get_block(dct_params_t *params)
@@ -372,7 +379,6 @@ void dct_get_block(dct_params_t *params)
         act_block = (VUC *)&block[i * 2 + 1];
         *act_block = spu_shuffle(read_tmp[offset / 16],
                         read_tmp[offset / 16 + 1], mask_dct2[offset % 16]);
-        
         src = (ULL) (UL) params->prediction;
         offset = src % 128;
         src -= offset;
@@ -482,7 +488,10 @@ int main(ULL spe, ULL argp, ULL envp) {
                 quant_tbl = uvquanttbl_def;
             }
 
-            dct_quant_block_8x8(block, dct_params.out_data, quant_tbl);
+            dct_quant_block_8x8(dct_params.out_data, quant_tbl);
+            
+            // inform PPE about finish
+            spu_write_out_intr_mbox ((unsigned) SPE_FINISH);
         }
         else // SPE_END
         {

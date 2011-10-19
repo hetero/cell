@@ -67,7 +67,7 @@ static yuv_t* read_yuv(FILE *file)
     printf("Reading...\n");
 
     /* Read Y' */
-    nothing = posix_memalign((void **) &(image->Y), 128, width*height);
+    nothing = posix_memalign((void **) &(image->Y), 128, width*(height + 8));
     len += fread(image->Y, 1, width*height, file);
     if(ferror(file))
     {
@@ -110,6 +110,7 @@ void *run_spe(void *thread_arg) {
 
     entry = SPE_DEFAULT_ENTRY;
     printf("Running SPE...\n");
+    printf("%d\n", arg->qp);
     ret = spe_context_run(arg->spe, &entry, 0, NULL, (void *) (unsigned long) arg->qp, &stop_info);
     if (ret < 0) {
         perror("spe_context_run");
@@ -321,7 +322,6 @@ int main(int argc, char **argv)
     
     struct c63_common *cm = init_c63_enc(width, height);
     cm->e_ctx.fp = outfile;
-
 
     spe_init(cm->qp);
     if (pthread_mutex_init(&mutex, 0) != 0)

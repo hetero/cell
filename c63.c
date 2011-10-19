@@ -156,20 +156,12 @@ static void dct_block_8x8(int spe_nr, int width, int height, int row, int col, u
     ptr = prediction + row * width + col;
     dct_params[spe_nr].prediction = (unsigned long) ptr;
 
-    dct_params[spe_nr].out_data = (unsigned long) &dct_out[spe_nr];
+    int16_t *ptr_16 = out_data + row * width + col * 8;
+    dct_params[spe_nr].out_data = (unsigned long) ptr_16;
 
     dct_params[spe_nr].quantization = quantization;
 
     run_dct_spe(spe_nr, &dct_params[spe_nr]);
-    
-    act_out = out_data + row * width + col;
-    for (r = 0; r < 8; ++r)
-    {
-        for (c = 0; c < 8; ++c)
-        {
-            act_out[r * width + c] = dct_out[spe_nr][r * 8 + c];
-        }
-    }
 }
 
 void *run_smart_thread(void *void_spe_nr) {
