@@ -40,6 +40,7 @@ extern int is_working[NUM_SPE];
 extern spe_context_ptr_t spe[8];
 extern int mode;
 extern pthread_mutex_t mutex;
+extern pthread_cond_t main_cond, work_cond;
 
 extern pthread_t smart_thread[NUM_SPE];
 

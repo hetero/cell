@@ -118,13 +118,14 @@ void dct_quantize(uint8_t *in_data, uint8_t *prediction,
     g_dct_out_data = out_data;
     
     mode = DCT_MODE;
-    unlock();
+    
+    if (pthread_cond_broadcast(&work_cond) != 0)
+         perror ("cond signal failed");
 
-    lock();
     while (mode != WAIT_MODE) {
-        unlock();
-        lock();
-    }
+        if (pthread_cond_wait(&main_cond, &mutex) != 0)
+                  perror ("cond wait failed");
+    }   
 }
 
 void destroy_frame(struct frame *f)

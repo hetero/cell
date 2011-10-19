@@ -26,12 +26,12 @@ void c63_motion_estimate(struct c63_common *cm)
     global_cm = cm;
 
     mode = SAD_MODE;
-    unlock();
+    if (pthread_cond_broadcast(&work_cond) != 0)
+            perror ("cond signal failed");
 
-    lock();
     while (mode != WAIT_MODE) {
-        unlock();
-        lock();
+        if (pthread_cond_wait(&main_cond, &mutex) != 0)
+              perror ("cond wait failed");
     }
 }
 

@@ -121,6 +121,10 @@ void *run_spe(void *thread_arg) {
 
 void spe_init(uint8_t qp) {
     working_spes = 0;
+    if (pthread_cond_init(&main_cond, 0) != 0)
+            perror ("cond init failed");
+    if (pthread_cond_init(&work_cond, 0) != 0)
+            perror ("cond init failed");
 
     int i, ret;
     prog = spe_image_open("sad_spe.elf");
@@ -398,11 +402,18 @@ int main(int argc, char **argv)
 //    fclose(predfile);
     
     mode = OFF_MODE;
+    if (pthread_cond_broadcast(&work_cond) != 0)
+            perror ("cond signal failed");
     unlock();
 
     for (spe_nr = 0; spe_nr < NUM_SPE; spe_nr++)
         pthread_join(smart_thread[spe_nr], NULL);
 
+    if (pthread_cond_destroy (&main_cond) != 0)
+            perror ("cond destroy 1 failed");
+    if (pthread_cond_destroy (&work_cond) != 0)
+            perror ("cond destroy 2 failed");
+    
     if (pthread_mutex_destroy (&mutex) != 0)
         perror("mutex destroy failed");
 

@@ -7,6 +7,7 @@ spe_context_ptr_t spe[8] __attribute__((aligned(128)));
 int mode;
 pthread_mutex_t mutex;
 pthread_t smart_thread[NUM_SPE];
+pthread_cond_t main_cond, work_cond;
 
 static sad_out_t spe_out[NUM_SPE] __attribute__((aligned(128)));
 static sad_params_t sad_params[NUM_SPE] __attribute__((aligned(128)));
@@ -196,8 +197,8 @@ void *run_smart_thread(void *void_spe_nr) {
     while (1) {
         lock();
         while (mode == WAIT_MODE) {
-            unlock();
-            lock();
+            if (pthread_cond_wait(&work_cond, &mutex) != 0)
+                perror ("cond wait failed");
         }
 
         if (mode == OFF_MODE) {
@@ -209,8 +210,11 @@ void *run_smart_thread(void *void_spe_nr) {
             if (is_working[spe_nr]) {
                 is_working[spe_nr] = 0;
                 working_spes--;
-                if (working_spes == 0)
+                if (working_spes == 0) {
                     mode = WAIT_MODE;
+                    if (pthread_cond_signal(&main_cond) != 0)
+                        perror ("cond signal failed");
+                }
             }
             unlock();
             continue;
